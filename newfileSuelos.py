@@ -4,117 +4,110 @@ import plotly.graph_objects as go
 import io
 
 # Configuración inicial
-st.set_page_config(page_title="Geotecnia Master Pro", layout="wide")
+st.set_page_config(page_title="Geotecnia Master: Universal Solver", layout="wide")
 
-st.title("🏗️ Geotecnia Master: Suite Completa de Suelos")
-st.markdown("Cálculos Gravimétricos, Límites de Atterberg y Reportes Profesionales.")
+st.title("🏗️ Geotecnia Master: Motor de Resolución Universal")
+st.markdown("Solucionador para Relaciones de Fase, Perfiles de Presión y Carta de Plasticidad.")
 
-# --- PESTAÑAS PRINCIPALES ---
-tab1, tab2, tab3 = st.tabs(["📊 Fase de Suelos", "🧪 Plasticidad", "📥 Exportar Reporte"])
+# --- BARRA LATERAL: ENTRADA DE DATOS PARA RELACIONES DE FASE ---
+st.sidebar.header("📥 Datos para Fase de Suelos")
+st.sidebar.info("Para problemas del tipo 2-1 al 2-15, introduce los datos conocidos aquí.")
 
-# --- LÓGICA COMPARTIDA (Inicialización) ---
-w_nat, e, n, s, ip, ll, lp = 0, 0, 0, 0, 0, 0, 0
+in_gs = st.sidebar.number_input("Gs (Gravedad Específica)", value=0.0, step=0.01)
+in_e = st.sidebar.number_input("e (Relación de Vacíos)", value=0.0, step=0.001)
+in_n = st.sidebar.number_input("n (Porosidad) [%]", value=0.0, step=0.1) / 100
+in_w = st.sidebar.number_input("w (Humedad) [%]", value=0.0, step=0.1) / 100
+in_s = st.sidebar.number_input("S (Saturación) [%]", value=0.0, step=0.1) / 100
+in_gh = st.sidebar.number_input("γ (Peso Húmedo) [kN/m³]", value=0.0, step=0.1)
+in_gd = st.sidebar.number_input("γd (Peso Seco) [kN/m³]", value=0.0, step=0.1)
 
-# --- PESTAÑA 1: GRAVIMETRÍA ---
-with tab1:
-    st.header("Análisis de Fases y Pesos Unitarios")
-    col_in1, col_in2 = st.columns(2)
+# Pestañas principales
+tabs = st.tabs(["🧩 Relaciones de Fase", "🗂️ Perfiles de Presión", "📈 Carta Casagrande", "📥 Exportar"])
+
+# --- TAB 1: RELACIONES DE FASE ---
+with tabs[0]:
+    st.header("Resolución de Índices y Propiedades")
     
-    with col_in1:
-        wm = st.number_input("Peso Húmedo (Wm) [g]", value=1150.0, step=0.1)
-        ws = st.number_input("Peso Seco (Ws) [g]", value=950.0, step=0.1)
-    with col_in2:
-        vt = st.number_input("Volumen Total (Vt) [cm³]", value=600.0, step=0.1)
-        gs = st.number_input("Gravedad Específica (Gs)", value=2.65, step=0.01)
+    # Motor de Inferencia (Lógica de Despeje)
+    gs, e, n, w, s, gh, gd = in_gs, in_e, in_n, in_w, in_s, in_gh, in_gd
+    gw = 9.81  # kN/m3
+    
+    for _ in range(4): # Varias pasadas para encadenar fórmulas
+        if e > 0 and n == 0: n = e / (1 + e)
+        if n > 0 and e == 0: e = n / (1 - n)
+        if s > 0 and e > 0 and w > 0 and gs == 0: gs = (s * e) / w
+        if s > 0 and e > 0 and gs > 0 and w == 0: w = (s * e) / gs
+        if w > 0 and gs > 0 and s > 0 and e == 0: e = (w * gs) / s
+        if w > 0 and gs > 0 and e > 0 and s == 0: s = (w * gs) / e
+        if gs > 0 and e > 0 and gd == 0: gd = (gs * gw) / (1 + e)
+        if gd > 0 and gs > 0 and e == 0: e = ((gs * gw) / gd) - 1
+        if gd > 0 and w > 0 and gh == 0: gh = gd * (1 + w)
+        if gh > 0 and w > 0 and gd == 0: gd = gh / (1 + w)
 
-    try:
-        # Cálculos de fase
-        ww = wm - ws
-        vs = ws / gs
-        vw = ww / 1.0
-        vv = vt - vs
+    if gs > 0 or e > 0 or gh > 0:
+        res_fase = pd.DataFrame({
+            "Parámetro": ["Gs", "e", "n (%)", "w (%)", "S (%)", "γ (kN/m³)", "γd (kN/m³)"],
+            "Valor": [f"{gs:.2f}", f"{e:.3f}", f"{n*100:.1f}%", f"{w*100:.1f}%", f"{s*100:.1f}%", f"{gh:.2f}", f"{gd:.2f}"]
+        })
+        st.table(res_fase)
+        
+        # Diagrama de fases unitario
+        vs = 1.0
+        vv = e * vs
+        vw = s * vv
         va = vv - vw
+        st.subheader("📊 Diagrama de Fases (Vs = 1 unitario)")
+        st.bar_chart(pd.DataFrame({"Fase": ["Muestra"], "Aire": [va], "Agua": [vw], "Sólidos": [vs]}).set_index("Fase"), color=["#BDC3C7", "#3498DB", "#7E5109"])
+    else:
+        st.warning("Introduce datos en la barra lateral para resolver.")
+
+# --- TAB 2: PERFILES DE PRESIÓN ---
+with tabs[1]:
+    st.header("Cálculo de Presiones (Ejercicios 2-16 a 2-19)")
+    c1, c2 = st.columns([1, 1.5])
+    with c1:
+        n_capas = st.number_input("Número de capas", 1, 5, 2)
+        nf = st.number_input("Profundidad Nivel Freático (m)", 0.0, 50.0, 3.0)
+        capas_data = []
+        for i in range(int(n_capas)):
+            st.markdown(f"**Capa {i+1}**")
+            h_i = st.number_input(f"Espesor (m) {i+1}", 0.1, 100.0, 5.0, key=f"hi{i}")
+            g_i = st.number_input(f"γ (kN/m³) {i+1}", 0.1, 30.0, 18.0, key=f"gi{i}")
+            capas_data.append({"h": h_i, "g": g_i})
+    with c2:
+        z_v, st_v, u_v, se_v = [0], [0], [0], [0]
+        z_acc, st_acc = 0, 0
+        for cp in capas_data:
+            z_acc += cp['h']
+            st_acc += cp['g'] * cp['h']
+            u_acc = (z_acc - nf) * 9.81 if z_acc > nf else 0
+            z_v.append(z_acc); st_v.append(st_acc); u_v.append(u_acc); se_v.append(st_acc - u_acc)
         
-        # Relaciones
-        e = vv / vs
-        n = (vv / vt) * 100
-        w_nat = (ww / ws) * 100
-        s = (vw / vv) * 100
-        
-        # Pesos unitarios
-        gm = wm / vt
-        gd = ws / vt
-        gsat = ((gs + e) * 1.0) / (1 + e)
+        df_p = pd.DataFrame({"Prof (m)": z_v, "σ Total": st_v, "u": u_v, "σ' Efectivo": se_v})
+        st.table(df_p)
+        st.line_chart(df_p.set_index("Prof (m)"))
 
-        # Visualización
-        st.subheader("🖼️ Diagrama de Fases (Proporciones)")
-        df_fases = pd.DataFrame({"Fase": ["Muestra"], "Aire": [va], "Agua": [vw], "Sólidos": [vs]})
-        st.bar_chart(df_fases.set_index("Fase"), color=["#BDC3C7", "#3498DB", "#7E5109"])
-
-        # Métricas
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("e (Rel. Vacíos)", f"{e:.3f}")
-        m2.metric("n (Porosidad)", f"{n:.1f}%")
-        m3.metric("w (Humedad)", f"{w_nat:.1f}%")
-        m4.metric("S (Saturación)", f"{s:.1f}%")
-        
-        st.info(f"**Pesos Unitarios (g/cm³):** Húmedo: {gm:.2f} | Seco: {gd:.2f} | Saturado: {gsat:.2f}")
-
-    except:
-        st.warning("Ajuste los datos para ver los resultados.")
-
-# --- PESTAÑA 2: PLASTICIDAD ---
-with tab2:
-    st.header("Límites de Atterberg")
-    col_l1, col_l2 = st.columns([1, 2])
+# --- TAB 3: CARTA CASAGRANDE ---
+with tabs[2]:
+    st.header("Carta de Plasticidad")
+    cl_ll = st.number_input("Límite Líquido (LL)", 0.0, 150.0, 40.0)
+    cl_lp = st.number_input("Límite Plástico (LP)", 0.0, 100.0, 20.0)
+    cl_ip = cl_ll - cl_lp
     
-    with col_l1:
-        ll = st.number_input("Límite Líquido (LL)", value=45.0)
-        lp = st.number_input("Límite Plástico (LP)", value=20.0)
-        ip = ll - lp
-        st.metric("Índice Plasticidad (IP)", f"{ip:.1f}%")
-        
-        # Clasificación rápida
-        if ip > (0.73 * (ll - 20)) and ll >= 50: clas = "CH (Arcilla Alta P.)"
-        elif ip > (0.73 * (ll - 20)) and ll < 50: clas = "CL (Arcilla Baja P.)"
-        else: clas = "Limo / Orgánico"
-        st.success(f"Clasificación Sugerida: {clas}")
+    fig = go.Figure()
+    lx = list(range(20, 101))
+    ly = [0.73*(x-20) for x in lx]
+    fig.add_trace(go.Scatter(x=lx, y=ly, mode='lines', name='Línea A', line=dict(color='black', dash='dash')))
+    fig.add_trace(go.Scatter(x=[cl_ll], y=[cl_ip], mode='markers', marker=dict(color='red', size=15), name='Tu Suelo'))
+    fig.update_layout(xaxis_title="LL", yaxis_title="IP", xaxis=dict(range=[0,100]), yaxis=dict(range=[0,60]))
+    st.plotly_chart(fig, use_container_width=True)
 
-    with col_l2:
-        # Carta de Plasticidad con Plotly (Dispersión)
-        fig = go.Figure()
-        linea_a_x = list(range(20, 101))
-        linea_a_y = [0.73 * (x - 20) for x in linea_a_x]
-        
-        fig.add_trace(go.Scatter(x=linea_a_x, y=linea_a_y, mode='lines', name='Línea A', line=dict(color='black', dash='dash')))
-        fig.add_trace(go.Scatter(x=[ll], y=[ip], mode='markers', marker=dict(color='red', size=15), name='Tu Suelo'))
-        
-        fig.update_layout(title="Carta de Casagrande", xaxis_title="LL", yaxis_title="IP", xaxis=dict(range=[0,100]), yaxis=dict(range=[0,60]))
-        st.plotly_chart(fig, use_container_width=True)
-
-# --- PESTAÑA 3: EXPORTACIÓN ---
-with tab3:
-    st.header("Generar Reporte Profesional")
-    st.write("Presiona el botón para descargar los resultados en formato Excel.")
-
-    # Preparar datos para Excel
-    datos_reporte = pd.DataFrame({
-        "Parámetro": ["Wm", "Ws", "Vt", "Gs", "e", "n", "w (%)", "S (%)", "LL", "LP", "IP"],
-        "Valor": [wm, ws, vt, gs, round(e,3), round(n,2), round(w_nat,2), round(s,2), ll, lp, ip]
-    })
-
-    def crear_excel(df):
+# --- TAB 4: EXPORTAR ---
+with tabs[3]:
+    st.header("Reporte Excel")
+    if st.button("Generar Reporte"):
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False, sheet_name='Resultados')
-        return output.getvalue()
+            pd.DataFrame({"Proyecto": ["Mi Calculo Geotecnico"]}).to_excel(writer, sheet_name='Info')
+        st.download_button(label="📥 Descargar Excel", data=output.getvalue(), file_name="geotecnia_pro.xlsx")
 
-    excel_file = crear_excel(datos_reporte)
-    
-    st.download_button(
-        label="📥 Descargar Reporte (.xlsx)",
-        data=excel_file,
-        file_name="informe_suelos.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-    st.table(datos_reporte)
