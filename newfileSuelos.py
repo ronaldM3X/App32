@@ -8,6 +8,7 @@ import io
 st.set_page_config(page_title="Geotecnia Suite Master v23.4", layout="wide", page_icon="🏗️")
 
 st.sidebar.title("👨‍🏫 Panel de Control")
+# Aplicando tus nombres de modo personalizados: Metas y Académico
 modo = st.sidebar.radio("Selecciona el Modo:", ("Metas (Laboratorio)", "Académico (Base Vs=1)"))
 st.sidebar.markdown("---")
 
@@ -35,7 +36,7 @@ with tabs[0]:
         inputs[clave] = cols_in[i%3].number_input(f"{diccionario_maestro[clave]}", value=0.0, format="%.4f", key=f"in_{clave}")
 
     if st.button("🚀 Calcular Base"):
-        # VALIDACIÓN SOLICITADA: No inventar si faltan datos en Metas
+        # VALIDACIÓN: No inventar si faltan datos en Metas
         tiene_peso = any(k in inputs and inputs[k] > 0 for k in ['ws', 'wm', 'ww'])
         tiene_volumen = any(k in inputs and inputs[k] > 0 for k in ['vs', 'vt', 'vv', 'vw', 'va'])
         
@@ -82,19 +83,30 @@ with tabs[0]:
         with c_sim:
             st.subheader("🕹️ 2. Simulador (Manda sobre la tabla)")
             
-            e_def = float(bc['e']) if bc['e'] > 0 else 0.70
-            w_def = float(bc['w']*100) if bc['w'] > 0 else 0.0
-            s_def = float(bc['s']*100) if bc['s'] > 0 else 0.0
-            ws_def = float(bc['ws'])
+            # --- LÓGICA DE HERENCIA ESTRICTA (SIN VALORES POR DEFECTO) ---
+            e_def = float(bc['e'])
+            w_def = float(bc['w'] * 100)
+            s_def = float(bc['s'] * 100)
             
-            if ws_def == 0 and modo == "Metas (Laboratorio)":
-                st.warning("⚠️ Sin Peso de Sólidos (Ws) definido.")
+            ws_def = float(bc['ws'])
+            if ws_def == 0 and bc['wm'] > 0:
+                ws_def = bc['wm'] / (1 + bc['w'])
+            
+            # Mensajes de error si faltan datos críticos para simular
+            errores = []
+            if e_def == 0: errores.append("Relación de vacíos (e)")
+            if ws_def == 0: errores.append("Peso de Sólidos (Ws)")
+            
+            if errores:
+                st.error(f"⚠️ **Faltan datos para simular:** No se pudo deducir {', '.join(errores)}. Ingresa estos valores en la Parte 1 o mueve los sliders manualmente.")
 
-            e_val = st.slider("Relación de vacíos (e)", 0.01, 5.0, e_def, key=f"sl_e_{sk}")
+            # Generación de sliders
+            e_val = st.slider("Relación de vacíos (e)", 0.0, 5.0, e_def, key=f"sl_e_{sk}")
             w_val = st.slider("Humedad (w %)", 0.0, 100.0, w_def, key=f"sl_w_{sk}") / 100
             s_val = st.slider("Grado de Saturación (S %)", 0.0, 100.0, s_def, key=f"sl_s_{sk}") / 100
             ws_val = st.slider("Peso de Sólidos (Ws)", 0.0, 2000.0, ws_def, key=f"sl_ws_{sk}")
             
+            # Recálculo final basado en sliders
             final = {k: 0.0 for k in diccionario_maestro.keys()}
             final['e'] = e_val
             final['ws'] = ws_val
@@ -108,7 +120,6 @@ with tabs[0]:
             
             final['vv'] = final['e'] * final['vs']
             
-            # Lógica de S vs W
             if s_val > 0:
                 final['s'] = s_val
                 final['vw'] = final['s'] * final['vv']
@@ -159,7 +170,7 @@ with tabs[0]:
             ])
             fig.update_layout(barmode='stack', height=350); st.plotly_chart(fig, use_container_width=True)
 
-# --- PESTAÑA 2: PRESIONES ---
+# --- RESTO DE PESTAÑAS (Presiones, Plasticidad, Reporte) ---
 with tabs[1]:
     st.header("🗂️ Esfuerzos Geostáticos")
     cp1, cp2 = st.columns([1, 2])
@@ -195,7 +206,6 @@ with tabs[1]:
         fig_p.add_trace(go.Scatter(x=se_l, y=z_pts, name='Efectivo', fill='tonextx', line=dict(color='green')))
         fig_p.update_yaxes(autorange="reversed"); st.plotly_chart(fig_p)
 
-# --- PESTAÑA 3: PLASTICIDAD ---
 with tabs[2]:
     st.header("📈 Plasticidad")
     cl1, cl2 = st.columns([1, 2])
@@ -211,7 +221,6 @@ with tabs[2]:
         fig_c.add_trace(go.Scatter(x=[ll], y=[ip], mode='markers', marker=dict(size=12, color='red')))
         fig_c.update_xaxes(title="LL"); fig_c.update_yaxes(title="IP"); st.plotly_chart(fig_c)
 
-# --- PESTAÑA 4: REPORTE ---
 with tabs[3]:
     st.header("📥 Descargar Reporte")
     if st.button("📊 Generar Excel"):
