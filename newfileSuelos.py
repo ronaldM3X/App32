@@ -4,160 +4,147 @@ import plotly.graph_objects as go
 import numpy as np
 import io
 
-# 1. CONFIGURACIÓN
+# 1. CONFIGURACIÓN DE PÁGINA
 st.set_page_config(page_title="Geotecnia Master v25.0", layout="wide")
 
-# Forzar reinicio al cambiar de modo
-if "m_act" not in st.session_state:
-    st.session_state.m_act = "Metas"
-
-st.sidebar.title("⚙️ Configuración")
+# Limpieza de caché al cambiar de modo
+if "m_prev" not in st.session_state: st.session_state.m_prev = "Metas"
 modo = st.sidebar.radio("Modo de Trabajo:", ("Metas", "Académico"))
 
-if modo != st.session_state.m_act:
-    st.session_state.m_act = modo
+if modo != st.session_state.m_prev:
+    st.session_state.m_prev = modo
     st.session_state.clear()
     st.rerun()
 
-# Etiquetas completas
+# 2. DICCIONARIO MAESTRO DE ETIQUETAS
 LABELS = {
     "gs": "Gs (Gravedad específica)", "e": "e (Relación de vacíos)", "n": "n (Porosidad %)",
     "w": "w (Contenido de humedad %)", "s": "S (Grado de saturación %)", "wm": "Wt (Peso total g)",
     "ws": "Ws (Peso sólidos g)", "ww": "Ww (Peso agua g)", "vt": "Vt (Volumen total cm³)",
     "vs": "Vs (Volumen sólidos cm³)", "vv": "Vv (Volumen vacíos cm³)", "vw": "Vw (Volumen agua cm³)",
-    "va": "Va (Volumen aire cm³)", "gh": "γ (Húmedo kN/m³)", "gd": "γd (Seco kN/m³)"
+    "va": "Va (Volumen aire cm³)", "gh": "γ (Peso unitario húmedo kN/m³)", "gd": "γd (Peso unitario seco kN/m³)"
 }
 
 st.title(f"🏗️ Geotecnia Master - {modo}")
 st.markdown("---")
 
-t1, t2, t3, t4 = st.tabs(["🧩 Gravimetría", "🗂️ Esfuerzos", "📈 Plasticidad", "📥 Excel"])
+tabs = st.tabs(["🧩 Gravimetría", "🗂️ Esfuerzos", "📈 Plasticidad", "📥 Excel"])
 
-with t1:
-    col_in, col_sim = st.columns([1, 1.2])
-    
-    with col_in:
-        st.subheader("Paso 1: Entrada")
+# --- PESTAÑA 1: GRAVIMETRÍA ---
+with tabs[0]:
+    c1, c2 = st.columns([1, 1.2])
+    with c1:
+        st.subheader("📥 Entrada de Datos")
         sel = st.multiselect("Variables conocidas:", options=list(LABELS.keys()), format_func=lambda x: LABELS[x])
-        d_in = {}
-        for k in sel:
-            d_in[k] = st.number_input(LABELS[k], value=0.0, format="%.4f", key=f"p1_{k}")
+        d_in = {k: st.number_input(LABELS[k], value=0.0, format="%.4f", key=f"in_{k}") for k in sel}
         
-        if st.button("🚀 Calcular Base"):
-            # Lógica simple sin bucles infinitos
-            b = {k: 0.0 for k in LABELS.keys()}
+        if st.button("🚀 Calcular Inicial"):
+            base = {k: 0.0 for k in LABELS.keys()}
             for k, v in d_in.items():
-                b[k] = v / 100 if k in ['w', 'n', 's'] and v > 1.0 else v
+                base[k] = v / 100 if k in ['w', 'n', 's'] and v > 1.0 else v
             
-            # Cálculo de emergencia para inicializar sliders
-            if b['gs'] == 0: b['gs'] = 2.65
-            if b['ws'] == 0: b['ws'] = 2.65
-            if b['e'] == 0 and b['n'] > 0: b['e'] = b['n'] / (1 - b['n'])
-            elif b['e'] == 0: b['e'] = 0.65
-            
-            st.session_state.base = b
+            for _ in range(100):
+                if base['gs'] > 0 and base['ws'] > 0 and base['vs'] == 0: base['vs'] = base['ws'] / base['gs']
+                if base['ws'] > 0 and base['w'] > 0 and base['ww'] == 0: base['ww'] = base['ws'] * base['w']
+                if base['vs'] > 0 and base['e'] > 0 and base['vv'] == 0: base['vv'] = base['e'] * base['vs']
+                if base['vs'] > 0 and base['vv'] > 0: base['vt'] = base['vs'] + base['vv']
+            st.session_state.base = base
             st.rerun()
 
     if "base" in st.session_state:
-        with col_sim:
-            st.subheader("🕹️ Simulador Dinámico")
+        with c2:
+            st.subheader("🕹️ Simulador")
             b = st.session_state.base
+            e_s = st.slider("Ajustar e", 0.01, 4.0, float(b['e']) if b['e']>0 else 0.65)
+            w_s = st.slider("Humedad w %", 0.0, 100.0, float(b['w']*100) if b['w']>0 else 15.0) / 100
+            ws_s = st.slider("Peso Ws (g)", 0.1, 5000.0, float(b['ws']) if b['ws']>0 else 2.65, disabled=(modo=="Académico"))
             
-            # Sliders independientes
-            e_s = st.slider("Relación de vacíos (e)", 0.01, 5.0, float(b['e']))
-            w_s = st.slider("Humedad (w %)", 0.0, 100.0, float(b['w']*100)) / 100
-            ws_s = st.slider("Peso Sólidos (Ws)", 0.1, 5000.0, float(b['ws']), disabled=(modo=="Académico"))
-            
-            # --- CÁLCULO MATEMÁTICO REAL ---
-            Gs = b['gs']
-            
+            # Lógica Vs Dinámico
+            Gs = b['gs'] if b['gs'] > 0 else 2.65
             if modo == "Académico":
-                Vs = 1.0
-                Ws = Gs * Vs
+                Vs, Ws = 1.0, Gs
             else:
                 Ws = ws_s
-                Vs = Ws / Gs # VS DEPENDE DE WS. SI WS=2.65 Y GS=2.65, VS SERÁ 1.0. SI WS=5, VS SERÁ 1.88.
+                Vs = Ws / Gs
             
             Vv = e_s * Vs
             Vt = Vs + Vv
             Ww = Ws * w_s
             Vw = Ww
-            Sat = (Vw / Vv) if Vv > 0 else 0
-            
-            if Sat > 1.0:
-                st.warning("⚠️ Saturación corregida al 100%")
-                Sat, Vw, Ww = 1.0, Vv, Vv
+            S = Vw / Vv if Vv > 0 else 0
+            if S > 1: S, Vw, Ww = 1.0, Vv, Vv
             
             res = {
-                "gs": Gs, "e": e_s, "n": Vv/Vt, "w": w_s, "s": Sat,
-                "wm": Ws + Ww, "ws": Ws, "ww": Ww, "vt": Vt, "vs": Vs,
-                "vv": Vv, "vw": Vw, "va": max(0, Vv-Vw),
+                "gs": Gs, "e": e_s, "n": Vv/Vt, "w": w_s, "s": S, "wm": Ws+Ww, "ws": Ws, "ww": Ww,
+                "vt": Vt, "vs": Vs, "vv": Vv, "vw": Vw, "va": max(0, Vv-Vw),
                 "gh": ((Ws+Ww)/Vt)*9.81, "gd": (Ws/Vt)*9.81
             }
+            
+            st.table(pd.DataFrame([{"Propiedad": LABELS[k], "Valor": f"{res[k]*100:.2f}%" if "%" in LABELS[k] else f"{res[k]:.4f}"} for k in LABELS]))
+            st.session_state.res_g = res
 
-            if st.button("Reiniciar"):
-                st.session_state.clear()
-                st.rerun()
-
-        st.markdown("---")
-        c_res, c_gra = st.columns([1, 1])
-        
-        with c_res:
-            st.subheader("📊 Resultados")
-            df_res = pd.DataFrame([{"Propiedad": LABELS[k], "Valor": f"{res[k]*100:.2f}%" if "%" in LABELS[k] else f"{res[k]:.4f}"} for k in LABELS])
-            st.table(df_res)
-            st.session_state.df_excel = df_res
-
-        with c_gra:
-            fig = go.Figure(data=[
-                go.Bar(name='Sólidos', x=['Fases'], y=[res['vs']], marker_color='#7E5109', text=f"{res['vs']:.3f}"),
-                go.Bar(name='Agua', x=['Fases'], y=[res['vw']], marker_color='#3498DB', text=f"{res['vw']:.3f}"),
-                go.Bar(name='Aire', x=['Fases'], y=[res['va']], marker_color='#BDC3C7', text=f"{res['va']:.3f}")
-            ])
-            fig.update_layout(barmode='stack', title="Diagrama de Fases (Vs dinámico)")
-            st.plotly_chart(fig, use_container_width=True)
+        fig_f = go.Figure(data=[
+            go.Bar(name='Sólidos', x=['Fases'], y=[Vs], marker_color='#7E5109', text=f"Vs: {Vs:.3f}"),
+            go.Bar(name='Agua', x=['Fases'], y=[Vw], marker_color='#3498DB', text=f"Vw: {Vw:.3f}"),
+            go.Bar(name='Aire', x=['Fases'], y=[max(0, Vv-Vw)], marker_color='#BDC3C7', text=f"Va: {max(0, Vv-Vw):.3f}")
+        ])
+        fig_f.update_layout(barmode='stack', height=300); st.plotly_chart(fig_f, use_container_width=True)
 
 # --- PESTAÑA 2: ESFUERZOS ---
-with t2:
-    st.subheader("Perfil de Esfuerzos")
-    n_e = st.number_input("Estratos", 1, 10, 2)
-    nf = st.number_input("N.F. (m)", 0.0, 50.0, 2.0)
-    data = []
-    for i in range(int(n_e)):
-        c1, c2 = st.columns(2)
-        h = c1.number_input(f"Espesor {i+1}", 0.1, 50.0, 2.0, key=f"h{i}")
-        g = c2.number_input(f"γ {i+1}", 1.0, 30.0, 18.0, key=f"g{i}")
-        data.append({'h': h, 'g': g})
-    
-    zs = sorted(list(set([0.0, nf] + [sum(d['h'] for d in data[:i+1]) for i in range(len(data))])))
-    zs = [z for z in zs if z <= sum(d['h'] for d in data)]
-    
-    sig, u, sig_e = [], [], []
-    s_acu = 0
-    for i in range(len(zs)):
-        z = zs[i]
+with tabs[1]:
+    st.subheader("🗂️ Perfil de Esfuerzos")
+    ca, cb = st.columns([1, 2])
+    with ca:
+        n_est = st.number_input("Estratos", 1, 10, 2)
+        nf = st.number_input("NF (m)", 0.0, 100.0, 2.0)
+        datos = []
+        for i in range(int(n_est)):
+            h = st.number_input(f"H{i+1}", 0.1, 50.0, 3.0, key=f"h_{i}")
+            g = st.number_input(f"γ{i+1}", 1.0, 25.0, 18.0, key=f"g_{i}")
+            datos.append({'h': h, 'g': g})
+
+    puntos = sorted(list(set([0.0, nf] + [sum(d['h'] for d in datos[:i+1]) for i in range(len(datos))])))
+    z_l, st_l, u_l, se_l, acu = [], [], [], [], 0
+    for i, z in enumerate(puntos):
         if i > 0:
-            dz = z - zs[i-1]
-            z_m = (z + zs[i-1])/2
-            h_c = 0
-            for d in data:
-                h_c += d['h']
-                if z_m <= h_c:
-                    s_acu += dz * d['g']
-                    break
-        pres_u = (z - nf) * 9.81 if z > nf else 0
-        sig.append(s_acu); u.append(pres_u); sig_e.append(s_acu - pres_u)
-    
-    df_e = pd.DataFrame({"Z(m)": zs, "Total": sig, "Poros": u, "Efectivo": sig_e})
-    st.dataframe(df_e)
-    st.session_state.df_esf = df_e
+            dz = z - puntos[i-1]
+            z_m = (z + puntos[i-1])/2
+            h_acc = 0
+            for d in datos:
+                h_acc += d['h']
+                if z_m <= h_acc: acu += dz * d['g']; break
+        u = (z - nf) * 9.81 if z > nf else 0
+        z_l.append(z); st_l.append(acu); u_l.append(u); se_l.append(acu - u)
+
+    with cb:
+        df_e = pd.DataFrame({"Z(m)": z_l, "σ Total": st_l, "u": u_l, "σ' Efec": se_l})
+        st.dataframe(df_e); st.session_state.res_e = df_e
+        fig_e = go.Figure()
+        fig_e.add_trace(go.Scatter(x=st_l, y=z_l, name='σ Total', line=dict(color='brown')))
+        fig_e.add_trace(go.Scatter(x=u_l, y=z_l, name='u', line=dict(color='blue')))
+        fig_e.add_trace(go.Scatter(x=se_l, y=z_l, name="σ' Efec", fill='tonextx', line=dict(color='green')))
+        fig_e.update_yaxes(autorange="reversed"); st.plotly_chart(fig_e)
+
+# --- PESTAÑA 3: PLASTICIDAD ---
+with tabs[2]:
+    st.subheader("📈 Plasticidad")
+    ll = st.number_input("Límite Líquido", 0, 150, 40)
+    lp = st.number_input("Límite Plástico", 0, 100, 20)
+    ip = ll - lp
+    st.metric("Índice de Plasticidad", ip)
+    xv = np.linspace(0, 100, 100)
+    fig_p = go.Figure()
+    fig_p.add_trace(go.Scatter(x=xv, y=0.73*(xv-20), name='Línea A', line=dict(color='black')))
+    fig_p.add_trace(go.Scatter(x=[ll], y=[ip], mode='markers', marker=dict(size=12, color='red'), name="Suelo"))
+    st.plotly_chart(fig_p); st.session_state.res_p = pd.DataFrame({"Dato": ["LL", "LP", "IP"], "Valor": [ll, lp, ip]})
 
 # --- PESTAÑA 4: EXCEL ---
-with t4:
-    st.subheader("Reporte")
-    buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
-        if "df_excel" in st.session_state: st.session_state.df_excel.to_excel(writer, sheet_name='Fases', index=False)
-        if "df_esf" in st.session_state: st.session_state.df_esf.to_excel(writer, sheet_name='Esfuerzos', index=False)
-    st.download_button("💾 Bajar Excel", buf.getvalue(), "Geotecnia_Reporte.xlsx")
-    
+with tabs[3]:
+    if st.button("📊 Generar Excel"):
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine='xlsxwriter') as wr:
+            if "res_g" in st.session_state: pd.DataFrame([{"Prop": LABELS[k], "Val": st.session_state.res_g[k]} for k in LABELS]).to_excel(wr, sheet_name='Gravimetria')
+            if "res_e" in st.session_state: st.session_state.res_e.to_excel(wr, sheet_name='Esfuerzos')
+            if "res_p" in st.session_state: st.session_state.res_p.to_excel(wr, sheet_name='Plasticidad')
+        st.download_button("💾 Descargar", buf.getvalue(), "Reporte.xlsx")
+        
