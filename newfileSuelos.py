@@ -11,7 +11,6 @@ st.markdown("""
     <style>
     .stTable { font-size: 1.1rem; }
     .stMetric { border: 1px solid #e1e4e8; padding: 10px; border-radius: 8px; }
-    .critical-alert { color: #ff4b4b; font-weight: bold; border: 2px solid #ff4b4b; padding: 10px; border-radius: 5px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -28,9 +27,11 @@ tabs = st.tabs(["🧩 Gravimetría & Fases", "🗂️ Perfil de Esfuerzos", "�
 # --- PESTAÑA 1: GRAVIMETRÍA ---
 with tabs[0]:
     dicc = {
-        "gs": "Gs", "e": "e", "n": "n %", "w": "w %", "s": "S %", 
-        "wm": "Wt", "ws": "Ws", "ww": "Ww", "vt": "Vt", "vs": "Vs", 
-        "vv": "Vv", "vw": "Vw", "va": "Va", "gh": "γ", "gd": "γd"
+        "gs": "Gs (Gravedad específica)", "e": "e (Relación de vacíos)", "n": "n (Porosidad %)",
+        "w": "w (Contenido de humedad %)", "s": "S (Grado de saturación %)", "wm": "Wt (Peso total)",
+        "ws": "Ws (Peso sólidos)", "ww": "Ww (Peso agua)", "vt": "Vt (Volumen total)",
+        "vs": "Vs (Volumen sólidos)", "vv": "Vv (Volumen vacíos)", "vw": "Vw (Volumen agua)",
+        "va": "Va (Volumen aire)", "gh": "γ (Peso unitario húmedo)", "gd": "γd (Peso unitario seco)"
     }
 
     st.subheader("📥 Paso 1: Datos de Entrada")
@@ -42,15 +43,13 @@ with tabs[0]:
         inputs[clave] = cols_in[i%3].number_input(f"{dicc[clave]}", value=0.0, format="%.4f", key=f"in_{clave}")
 
     if st.button("🚀 Calcular Estado Inicial"):
-        # Inicializar con NaN para saber qué falta
         d = {k: 0.0 for k in dicc.keys()}
         for k, v in inputs.items():
             d[k] = v / 100 if k in ['w', 'n', 's'] and v > 1.0 else v
         
         if modo == "Académico": d['vs'] = 1.0
         
-        # Iteración de convergencia mejorada
-        for _ in range(150):
+        for _ in range(100):
             if d['gs'] > 0 and d['ws'] > 0 and d['vs'] == 0: d['vs'] = d['ws'] / d['gs']
             if d['gs'] > 0 and d['vs'] > 0 and d['ws'] == 0: d['ws'] = d['gs'] * d['vs']
             if d['ws'] > 0 and d['w'] > 0 and d['ww'] == 0: d['ww'] = d['ws'] * d['w']
@@ -70,9 +69,6 @@ with tabs[0]:
 
         with c_sim:
             st.subheader("🕹️ Simulador Dinámico")
-            
-            # BLOQUE CRÍTICO: Aquí corregimos que Vs no sea siempre 1
-            # Si es Metas, intentamos usar el Vs real calculado.
             e_init = float(bc['e']) if bc['e'] > 0 else 0.65
             w_init = float(bc['w']*100) if bc['w'] > 0 else 15.0
             ws_init = float(bc['ws']) if bc['ws'] > 0 else 2.65
@@ -82,7 +78,6 @@ with tabs[0]:
             w_val = st.slider("Humedad (w %)", 0.0, 100.0, w_init, step=0.1) / 100
             ws_val = st.slider("Peso Sólidos (Ws)", 0.1, 5000.0, ws_init, disabled=(modo=="Académico"))
 
-            # Recálculo físico estricto
             final = {k: 0.0 for k in dicc.keys()}
             final['gs'] = gs_val
             final['e'] = e_val
@@ -101,12 +96,9 @@ with tabs[0]:
             final['vw'] = final['ww']
             final['s'] = final['vw'] / final['vv'] if final['vv'] > 0 else 0
 
-            # --- ALERTA DE PADRE: SATURACIÓN ---
-            if final['s'] > 1.0001:
-                st.error("⚠️ ¡CUIDADO! Saturación mayor al 100%. Revisa tus datos, el agua no cabe en los vacíos.")
-                # Forzamos consistencia para el gráfico
-                final['s'] = 1.0
-                final['vw'] = final['vv']
+            if final['s'] > 1.0:
+                st.warning("⚠️ Suelo saturado (S > 100%).")
+                final['s'], final['vw'] = 1.0, final['vv']
                 final['ww'] = final['vw']
 
             final['va'] = max(0.0, final['vv'] - final['vw'])
@@ -119,13 +111,13 @@ with tabs[0]:
             gd_val = (final['ws']/final['vt'])*9.81 if final['vt'] > 0 else 0
             
             res_df = pd.DataFrame({
-                "Propiedad": list(dicc.values()), 
+                "Propiedad": [dicc[k] for k in final.keys() if k in dicc], 
                 "Valor": [
                     f"{final['gs']:.3f}", f"{final['e']:.4f}", f"{final['n']*100:.2f}%", 
-                    f"{final['w']*100:.2f}%", f"{final['s']*100:.2f}%", f"{final['wm']:.3f}", 
-                    f"{final['ws']:.3f}", f"{final['ww']:.3f}", f"{final['vt']:.3f}", 
-                    f"{final['vs']:.3f}", f"{final['vv']:.3f}", f"{final['vw']:.3f}", 
-                    f"{final['va']:.3f}", f"{gh_val:.2f}", f"{gd_val:.2f}"
+                    f"{final['w']*100:.2f}%", f"{final['s']*100:.2f}%", f"{final['wm']:.3f} g", 
+                    f"{final['ws']:.3f} g", f"{final['ww']:.3f} g", f"{final['vt']:.3f} cm³", 
+                    f"{final['vs']:.3f} cm³", f"{final['vv']:.3f} cm³", f"{final['vw']:.3f} cm³", 
+                    f"{final['va']:.3f} cm³", f"{gh_val:.2f} kN/m³", f"{gd_val:.2f} kN/m³"
                 ]
             })
             st.table(res_df)
@@ -137,28 +129,71 @@ with tabs[0]:
             ])
             fig.update_layout(barmode='stack', height=300); st.plotly_chart(fig, use_container_width=True)
 
-# --- PESTAÑA 3: PLASTICIDAD (Con Línea U) ---
+# --- PESTAÑA 2: ESFUERZOS GEOSTÁTICOS ---
+with tabs[1]:
+    st.header("🗂️ Perfil de Esfuerzos")
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        n_est = st.number_input("Número de Estratos", 1, 10, 2)
+        nf = st.number_input("Nivel Freático (m)", 0.0, 100.0, 2.0)
+        datos_estratos = []
+        for i in range(int(n_est)):
+            h = st.number_input(f"Espesor H{i+1} (m)", 0.1, 50.0, 3.0, key=f"h_{i}")
+            g = st.number_input(f"γ{i+1} (kN/m³)", 1.0, 25.0, 18.0, key=f"g_{i}")
+            datos_estratos.append({'h': h, 'g': g})
+
+    prof, st_l, u_l, se_l, s_acu = [0.0], [0.0], [0.0], [0.0], 0
+    curr_z = 0
+    puntos_interes = [0.0]
+    for e in datos_estratos:
+        curr_z += e['h']
+        puntos_interes.append(curr_z)
+    if nf not in puntos_interes: puntos_interes.append(nf)
+    puntos_interes = sorted([p for p in puntos_interes if p <= sum(e['h'] for e in datos_estratos)])
+
+    prof_final, st_final, u_final, se_final = [0.0], [0.0], [0.0], [0.0]
+    s_acu = 0
+    for i in range(1, len(puntos_interes)):
+        z_inf = puntos_interes[i]
+        z_sup = puntos_interes[i-1]
+        dz = z_inf - z_sup
+        z_mid = (z_inf + z_sup) / 2
+        
+        temp_z = 0
+        gamma_actual = 0
+        for e in datos_estratos:
+            temp_z += e['h']
+            if z_mid <= temp_z:
+                gamma_actual = e['g']
+                break
+        
+        s_acu += dz * gamma_actual
+        u = (z_inf - nf) * 9.81 if z_inf > nf else 0
+        
+        prof_final.append(z_inf)
+        st_final.append(s_acu)
+        u_final.append(u)
+        se_final.append(s_acu - u)
+
+    with c2:
+        df_p = pd.DataFrame({"Z (m)": prof_final, "σ Total": st_final, "u": u_final, "σ' Efec.": se_final})
+        st.dataframe(df_p)
+        fig_p = go.Figure()
+        fig_p.add_trace(go.Scatter(x=st_final, y=prof_final, name='σ Total', line=dict(color='brown')))
+        fig_p.add_trace(go.Scatter(x=u_final, y=prof_final, name='u', line=dict(color='blue', dash='dash')))
+        fig_p.add_trace(go.Scatter(x=se_final, y=prof_final, name="σ' Efec.", fill='tonextx', line=dict(color='green')))
+        fig_p.update_yaxes(autorange="reversed", title="Profundidad (m)"); st.plotly_chart(fig_p)
+
+# --- PESTAÑA 3: PLASTICIDAD ---
 with tabs[2]:
     st.header("📈 Carta de Plasticidad")
-    cl, cr = st.columns([1, 2])
-    with cl:
-        ll = st.number_input("Límite Líquido (LL)", 0, 150, 40)
-        lp = st.number_input("Límite Plástico (LP)", 0, 100, 20)
-        ip = ll - lp
-        st.metric("Índice de Plasticidad (IP)", ip)
-        
-        # Validación Línea U
-        ip_u = 0.9 * (ll - 8)
-        if ip > ip_u:
-            st.warning("⚠️ El punto está por encima de la Línea U. Datos probablemente erróneos.")
-
-    with cr:
-        xv = np.linspace(8, 100, 100)
-        linea_a = 0.73 * (xv - 20)
-        linea_u = 0.9 * (xv - 8)
-        fig_c = go.Figure()
-        fig_c.add_trace(go.Scatter(x=xv, y=linea_a, name='Línea A (Clasificación)', line=dict(color='black')))
-        fig_c.add_trace(go.Scatter(x=xv, y=linea_u, name='Línea U (Límite Físico)', line=dict(color='red', dash='dot')))
-        fig_c.add_trace(go.Scatter(x=[ll], y=[ip], mode='markers', marker=dict(size=15, color='blue'), name="Tu Suelo"))
-        fig_c.update_xaxes(title="LL"); fig_c.update_yaxes(title="IP"); st.plotly_chart(fig_c)
-        
+    ll = st.number_input("Límite Líquido (LL)", 0, 150, 40)
+    lp = st.number_input("Límite Plástico (LP)", 0, 100, 20)
+    ip = ll - lp
+    st.metric("IP", ip)
+    xv = np.linspace(0, 100, 100)
+    fig_c = go.Figure()
+    fig_c.add_trace(go.Scatter(x=xv, y=0.73*(xv-20), name='Línea A', line=dict(color='black')))
+    fig_c.add_trace(go.Scatter(x=[ll], y=[ip], mode='markers+text', text=["Suelo"], marker=dict(size=12, color='red')))
+    st.plotly_chart(fig_c)
+    
