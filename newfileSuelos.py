@@ -5,15 +5,15 @@ import numpy as np
 import io
 
 # 1. CONFIGURACIÓN DE LA PÁGINA
-st.set_page_config(page_title="Geotecnia Suite Master v12.5", layout="wide", page_icon="🏗️")
-st.title("🏗️ Geotecnia Master: Suite Integral v12.5")
+st.set_page_config(page_title="Geotecnia Suite Master v13.0", layout="wide", page_icon="🏗️")
+st.title("🏗️ Geotecnia Master: Suite Integral v13.0")
 st.markdown("---")
 
 tabs = st.tabs(["🧩 Gravimetría & Simulación", "🗂️ Perfil de Presiones", "📈 Plasticidad & SUCS", "📥 Reporte Final"])
 
 # --- PESTAÑA 1: GRAVIMETRÍA & DIAGNÓSTICO ---
 with tabs[0]:
-    st.header("Propiedades Físicas con Control Estructural (e)")
+    st.header("Propiedades Físicas con Control Estructural")
     
     diccionario_maestro = {
         "gs": "Gs (Gravedad específica)", "e": "e (Relación de vacíos)", "n": "n (Porosidad %)",
@@ -35,7 +35,7 @@ with tabs[0]:
         for pct in ['w', 'n', 's']:
             if d[pct] > 1.0: d[pct] /= 100
         
-        # Motor de cálculo de 30 iteraciones para resolver todas las dependencias
+        # Motor de cálculo iterativo
         for _ in range(30):
             if d['ws'] > 0 and d['gs'] > 0: d['vs'] = d['ws'] / d['gs']
             if d['wm'] > 0 and d['ws'] > 0: d['ww'] = d['wm'] - d['ws']
@@ -64,10 +64,13 @@ with tabs[0]:
             st.subheader("🕹️ Controles Dinámicos")
             # 1. Ajuste de Relación de Vacíos (e)
             max_e_val = max(5.0, float(ld['e'] * 2))
-            new_e = st.slider("Relación de vacíos (e)", 0.1, max_e_val, float(ld['e']))
+            new_e = st.slider("Relación de vacíos (e)", 0.1, max_e_val, float(ld['e']) if ld['e'] > 0 else 0.5)
             if new_e != ld['e']:
-                ld['e'] = new_e; ld['vv'] = ld['vs'] * new_e; ld['n'] = new_e / (1 + new_e)
-                ld['vw'] = ld['vv'] * ld['s']; ld['ww'] = ld['vw'] * 1.0
+                ld['e'] = new_e
+                ld['vv'] = ld['vs'] * new_e
+                ld['n'] = new_e / (1 + new_e)
+                ld['vw'] = ld['vv'] * ld['s']
+                ld['ww'] = ld['vw'] * 1.0
                 ld['w'] = ld['ww'] / ld['ws'] if ld['ws'] > 0 else 0
             
             # 2. Humedad y Saturación
@@ -83,9 +86,9 @@ with tabs[0]:
 
             # 3. Masas y Volúmenes de Sólidos
             ld['ws'] = st.number_input("Peso Sólidos Ws (g)", value=float(ld['ws']))
-            ld['vs'] = ld['ws'] / ld['gs']
+            if ld['gs'] > 0: ld['vs'] = ld['ws'] / ld['gs']
             
-            # Recalcular finales para tabla y gráfico
+            # Recálculos de seguridad
             ld['vt'] = ld['vs'] + ld['vv']
             ld['wm'] = ld['ws'] + ld['ww']
             ld['va'] = max(0.0, ld['vv'] - ld['vw'])
@@ -93,26 +96,30 @@ with tabs[0]:
 
         with c_res:
             st.subheader("📊 Estado en Tiempo Real")
+            
+            # PROTECCIÓN CONTRA DIVISIÓN POR CERO (Cálculo de Pesos Unitarios)
+            gh_val = (ld['wm'] / ld['vt']) * 9.81 if ld['vt'] > 0 else 0.0
+            gd_val = (ld['ws'] / ld['vt']) * 9.81 if ld['vt'] > 0 else 0.0
+            
             res_df = pd.DataFrame({"Propiedad": list(diccionario_maestro.values()), 
                                   "Valor": [f"{ld['gs']:.2f}", f"{ld['e']:.3f}", f"{ld['n']*100:.1f}%", f"{ld['w']*100:.2f}%", f"{ld['s']*100:.1f}%", 
                                            f"{ld['wm']:.2f}g", f"{ld['ws']:.2f}g", f"{ld['ww']:.2f}g", f"{ld['vt']:.2f}cm³", f"{ld['vs']:.2f}cm³", 
-                                           f"{ld['vv']:.2f}cm³", f"{ld['vw']:.2f}cm³", f"{ld['va']:.2f}cm³", f"{(ld['wm']/ld['vt'])*9.81:.2f}", f"{(ld['ws']/ld['vt'])*9.81:.2f}"]})
+                                           f"{ld['vv']:.2f}cm³", f"{ld['vw']:.2f}cm³", f"{ld['va']:.2f}cm³", 
+                                           f"{gh_val:.2f}", f"{gd_val:.2f}"]})
             st.table(res_df)
             st.session_state.df_grav_excel = res_df
             
             fig = go.Figure(data=[go.Bar(name='Sólidos', x=['Fases'], y=[ld['vs']], marker_color='#7E5109'),
                                   go.Bar(name='Agua', x=['Fases'], y=[ld['vw']], marker_color='#3498DB'),
                                   go.Bar(name='Aire', x=['Fases'], y=[ld['va']], marker_color='#BDC3C7')])
-            fig.update_layout(barmode='stack', height=350); st.plotly_chart(fig, use_container_width=True)
+            fig.update_layout(barmode='stack', height=350, margin=dict(t=10,b=10)); st.plotly_chart(fig, use_container_width=True)
 
         with c_ref:
             st.subheader("🔬 Diagnóstico")
             diagnostico = "Orgánico/Blando" if ld['e'] > 1.5 else "Mineral/Firme"
             st.info(f"Tipo probable: **{diagnostico}**")
-            st.write("**Valores típicos de e:**")
-            st.write("- Arenas: 0.4 - 1.0")
-            st.write("- Arcillas: 0.6 - 1.5")
-            st.write("- Turbas: > 3.0")
+            st.write("**Referencia de e:**")
+            st.write("- Arenas: 0.4-1.0 | Arcillas: 0.6-1.5 | Turbas: >3.0")
 
 # --- PESTAÑA 2: PERFIL DE PRESIONES ---
 with tabs[1]:
@@ -126,10 +133,8 @@ with tabs[1]:
             g = st.number_input(f"γ {i+1} (kN/m³)", 10.0, 25.0, 18.0, key=f"z_g{i}")
             est.append({'h': h, 'g': g})
 
-    # Cálculo en puntos críticos (bordes y NF)
     pts = sorted(list(set([0.0, nf] + [sum(e['h'] for e in est[:i+1]) for i in range(len(est))])))
     pts = [p for p in pts if p <= sum(e['h'] for e in est)]
-    
     z_f, s_f, u_f, ef_f = [], [], [], []
     s_acu = 0
     for i in range(len(pts)):
@@ -146,14 +151,12 @@ with tabs[1]:
 
     with col_gr:
         df_p = pd.DataFrame({"Z (m)": z_f, "σ Total": s_f, "u (Poros)": u_f, "σ' Efectivo": ef_f})
-        st.subheader("📊 Tabla de Cálculos")
         st.dataframe(df_p, use_container_width=True)
         st.session_state.df_pres_excel = df_p
-        
         fig_p = go.Figure()
         fig_p.add_trace(go.Scatter(x=s_f, y=z_f, name='σ Total', line=dict(color='brown')))
-        fig_p.add_trace(go.Scatter(x=u_f, y=z_f, name='u (Agua)', line=dict(color='blue', dash='dash')))
-        fig_p.add_trace(go.Scatter(x=ef_f, y=z_f, name="σ' Efectivo", fill='tonextx', line=dict(color='green', width=3)))
+        fig_p.add_trace(go.Scatter(x=u_f, y=z_f, name='u', line=dict(color='blue', dash='dash')))
+        fig_p.add_trace(go.Scatter(x=ef_f, y=z_f, name="σ' Ef.", fill='tonextx', line=dict(color='green', width=3)))
         fig_p.update_yaxes(autorange="reversed", title="Profundidad (m)"); st.plotly_chart(fig_p, use_container_width=True)
 
 # --- PESTAÑA 3: PLASTICIDAD & SUCS ---
@@ -165,16 +168,14 @@ with tabs[2]:
         lp = st.number_input("Límite Plástico (LP)", 0, 100, 20)
         ip = ll - lp
         st.metric("Índice de Plasticidad (IP)", ip)
-        
         linea_a = 0.73 * (ll - 20)
         if ll < 50:
-            if ip > 7 and ip >= linea_a: s_tipo = "CL (Arcilla de baja plasticidad)"
-            elif ip < 4 or ip < linea_a: s_tipo = "ML (Limo de baja plasticidad)"
-            else: s_tipo = "CL-ML (Suelo Dual)"
+            if ip > 7 and ip >= linea_a: s_tipo = "CL (Arcilla Baja)"
+            elif ip < 4 or ip < linea_a: s_tipo = "ML (Limo Bajo)"
+            else: s_tipo = "CL-ML (Dual)"
         else:
-            if ip >= linea_a: s_tipo = "CH (Arcilla de alta plasticidad)"
-            else: s_tipo = "MH (Limo de alta plasticidad)"
-        
+            if ip >= linea_a: s_tipo = "CH (Arcilla Alta)"
+            else: s_tipo = "MH (Limo Alto)"
         st.subheader(f"Clasificación: {s_tipo}")
         st.session_state.df_lim_excel = pd.DataFrame({"LL": [ll], "LP": [lp], "IP": [ip], "Clasificación": [s_tipo]})
 
