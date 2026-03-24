@@ -4,147 +4,162 @@ import plotly.graph_objects as go
 import numpy as np
 import io
 
-# 1. CONFIGURACIÓN DE PÁGINA
+# 1. CONFIGURACIÓN Y REINICIO DE MEMORIA
 st.set_page_config(page_title="Geotecnia Master v25.0", layout="wide")
 
-# Limpieza de caché al cambiar de modo
-if "m_prev" not in st.session_state: st.session_state.m_prev = "Metas"
+if "m_act" not in st.session_state: st.session_state.m_act = "Metas"
 modo = st.sidebar.radio("Modo de Trabajo:", ("Metas", "Académico"))
 
-if modo != st.session_state.m_prev:
-    st.session_state.m_prev = modo
-    st.session_state.clear()
+# Hard Reset al cambiar modo para limpiar el Vs de la memoria
+if modo != st.session_state.m_act:
+    st.session_state.m_act = modo
+    for key in list(st.session_state.keys()):
+        if key != "m_act": del st.session_state[key]
     st.rerun()
 
-# 2. DICCIONARIO MAESTRO DE ETIQUETAS
 LABELS = {
     "gs": "Gs (Gravedad específica)", "e": "e (Relación de vacíos)", "n": "n (Porosidad %)",
     "w": "w (Contenido de humedad %)", "s": "S (Grado de saturación %)", "wm": "Wt (Peso total g)",
     "ws": "Ws (Peso sólidos g)", "ww": "Ww (Peso agua g)", "vt": "Vt (Volumen total cm³)",
     "vs": "Vs (Volumen sólidos cm³)", "vv": "Vv (Volumen vacíos cm³)", "vw": "Vw (Volumen agua cm³)",
-    "va": "Va (Volumen aire cm³)", "gh": "γ (Peso unitario húmedo kN/m³)", "gd": "γd (Peso unitario seco kN/m³)"
+    "va": "Va (Volumen aire cm³)", "gh": "γ (Húmedo kN/m³)", "gd": "γd (Seco kN/m³)"
 }
 
 st.title(f"🏗️ Geotecnia Master - {modo}")
-st.markdown("---")
 
 tabs = st.tabs(["🧩 Gravimetría", "🗂️ Esfuerzos", "📈 Plasticidad", "📥 Excel"])
 
-# --- PESTAÑA 1: GRAVIMETRÍA ---
+# --- PESTAÑA 1: GRAVIMETRÍA (Lógica Física Estricta) ---
 with tabs[0]:
     c1, c2 = st.columns([1, 1.2])
     with c1:
-        st.subheader("📥 Entrada de Datos")
-        sel = st.multiselect("Variables conocidas:", options=list(LABELS.keys()), format_func=lambda x: LABELS[x])
+        st.subheader("📥 Entrada de Laboratorio")
+        sel = st.multiselect("Conocidos:", options=list(LABELS.keys()), format_func=lambda x: LABELS[x])
         d_in = {k: st.number_input(LABELS[k], value=0.0, format="%.4f", key=f"in_{k}") for k in sel}
         
-        if st.button("🚀 Calcular Inicial"):
-            base = {k: 0.0 for k in LABELS.keys()}
+        if st.button("🚀 Procesar Datos"):
+            res = {k: 0.0 for k in LABELS.keys()}
             for k, v in d_in.items():
-                base[k] = v / 100 if k in ['w', 'n', 's'] and v > 1.0 else v
+                res[k] = v / 100 if k in ['w', 'n', 's'] and v > 1.0 else v
             
+            # Motor de convergencia basado en leyes físicas
             for _ in range(100):
-                if base['gs'] > 0 and base['ws'] > 0 and base['vs'] == 0: base['vs'] = base['ws'] / base['gs']
-                if base['ws'] > 0 and base['w'] > 0 and base['ww'] == 0: base['ww'] = base['ws'] * base['w']
-                if base['vs'] > 0 and base['e'] > 0 and base['vv'] == 0: base['vv'] = base['e'] * base['vs']
-                if base['vs'] > 0 and base['vv'] > 0: base['vt'] = base['vs'] + base['vv']
-            st.session_state.base = base
+                if res['gs'] > 0 and res['ws'] > 0 and res['vs'] == 0: res['vs'] = res['ws'] / res['gs']
+                if res['ws'] > 0 and res['w'] > 0 and res['ww'] == 0: res['ww'] = res['ws'] * res['w']
+                if res['vs'] > 0 and res['e'] > 0 and res['vv'] == 0: res['vv'] = res['e'] * res['vs']
+                if res['vs'] > 0 and res['vv'] >= 0: res['vt'] = res['vs'] + res['vv']
+            st.session_state.datos_base = res
             st.rerun()
 
-    if "base" in st.session_state:
+    if "datos_base" in st.session_state:
         with c2:
-            st.subheader("🕹️ Simulador")
-            b = st.session_state.base
-            e_s = st.slider("Ajustar e", 0.01, 4.0, float(b['e']) if b['e']>0 else 0.65)
-            w_s = st.slider("Humedad w %", 0.0, 100.0, float(b['w']*100) if b['w']>0 else 15.0) / 100
-            ws_s = st.slider("Peso Ws (g)", 0.1, 5000.0, float(b['ws']) if b['ws']>0 else 2.65, disabled=(modo=="Académico"))
+            st.subheader("🕹️ Simulador de Fases")
+            db = st.session_state.datos_base
             
-            # Lógica Vs Dinámico
-            Gs = b['gs'] if b['gs'] > 0 else 2.65
+            # Sliders con keys únicas para evitar el "ghosting" de valores viejos
+            e_dyn = st.slider("Relación de vacíos (e)", 0.01, 4.0, float(db['e']) if db['e']>0 else 0.65)
+            w_dyn = st.slider("Humedad (w %)", 0.0, 100.0, float(db['w']*100) if db['w']>0 else 15.0) / 100
+            ws_dyn = st.slider("Peso Sólidos (Ws)", 0.1, 5000.0, float(db['ws']) if db['ws']>0 else 2.65, disabled=(modo=="Académico"))
+            
+            # --- LEYES FÍSICAS NO NEGOCIABLES ---
+            Gs = db['gs'] if db['gs'] > 0 else 2.65
             if modo == "Académico":
-                Vs, Ws = 1.0, Gs
+                Vs = 1.0
+                Ws = Gs * Vs
             else:
-                Ws = ws_s
-                Vs = Ws / Gs
+                Ws = ws_dyn
+                Vs = Ws / Gs # Vs SIEMPRE sigue a Ws en modo Metas
             
-            Vv = e_s * Vs
+            Vv = e_dyn * Vs
             Vt = Vs + Vv
-            Ww = Ws * w_s
+            Ww = Ws * w_dyn
             Vw = Ww
             S = Vw / Vv if Vv > 0 else 0
-            if S > 1: S, Vw, Ww = 1.0, Vv, Vv
+            if S > 1.0: S, Vw, Ww = 1.0, Vv, Vv # Saturación máxima
             
-            res = {
-                "gs": Gs, "e": e_s, "n": Vv/Vt, "w": w_s, "s": S, "wm": Ws+Ww, "ws": Ws, "ww": Ww,
+            calc = {
+                "gs": Gs, "e": e_dyn, "n": Vv/Vt, "w": w_dyn, "s": S, "wm": Ws+Ww, "ws": Ws, "ww": Ww,
                 "vt": Vt, "vs": Vs, "vv": Vv, "vw": Vw, "va": max(0, Vv-Vw),
                 "gh": ((Ws+Ww)/Vt)*9.81, "gd": (Ws/Vt)*9.81
             }
             
-            st.table(pd.DataFrame([{"Propiedad": LABELS[k], "Valor": f"{res[k]*100:.2f}%" if "%" in LABELS[k] else f"{res[k]:.4f}"} for k in LABELS]))
-            st.session_state.res_g = res
+            st.table(pd.DataFrame([{"Propiedad": LABELS[k], "Valor": f"{calc[k]*100:.2f}%" if "%" in LABELS[k] else f"{calc[k]:.4f}"} for k in LABELS]))
+            st.session_state.final_g = calc
 
-        fig_f = go.Figure(data=[
+        fig = go.Figure(data=[
             go.Bar(name='Sólidos', x=['Fases'], y=[Vs], marker_color='#7E5109', text=f"Vs: {Vs:.3f}"),
             go.Bar(name='Agua', x=['Fases'], y=[Vw], marker_color='#3498DB', text=f"Vw: {Vw:.3f}"),
             go.Bar(name='Aire', x=['Fases'], y=[max(0, Vv-Vw)], marker_color='#BDC3C7', text=f"Va: {max(0, Vv-Vw):.3f}")
         ])
-        fig_f.update_layout(barmode='stack', height=300); st.plotly_chart(fig_f, use_container_width=True)
+        fig.update_layout(barmode='stack', height=350, title="Diagrama de Fases Dinámico")
+        st.plotly_chart(fig, use_container_width=True)
 
 # --- PESTAÑA 2: ESFUERZOS ---
 with tabs[1]:
-    st.subheader("🗂️ Perfil de Esfuerzos")
-    ca, cb = st.columns([1, 2])
-    with ca:
-        n_est = st.number_input("Estratos", 1, 10, 2)
-        nf = st.number_input("NF (m)", 0.0, 100.0, 2.0)
-        datos = []
+    st.subheader("🗂️ Cálculo de Presiones Geostáticas")
+    col_a, col_b = st.columns([1, 2])
+    with col_a:
+        n_est = st.number_input("Número de estratos", 1, 10, 2)
+        nf = st.number_input("Nivel Freático (m)", 0.0, 100.0, 2.0)
+        capas = []
         for i in range(int(n_est)):
-            h = st.number_input(f"H{i+1}", 0.1, 50.0, 3.0, key=f"h_{i}")
-            g = st.number_input(f"γ{i+1}", 1.0, 25.0, 18.0, key=f"g_{i}")
-            datos.append({'h': h, 'g': g})
+            h = st.number_input(f"Espesor H{i+1} (m)", 0.1, 50.0, 2.0, key=f"h{i}")
+            g = st.number_input(f"Peso Unitario γ{i+1}", 1.0, 25.0, 18.0, key=f"g{i}")
+            capas.append({'h': h, 'g': g})
 
-    puntos = sorted(list(set([0.0, nf] + [sum(d['h'] for d in datos[:i+1]) for i in range(len(datos))])))
-    z_l, st_l, u_l, se_l, acu = [], [], [], [], 0
-    for i, z in enumerate(puntos):
+    # Puntos críticos (superficie, cambios de estrato y NF)
+    pts = sorted(list(set([0.0, nf] + [sum(c['h'] for c in capas[:i+1]) for i in range(len(capas))])))
+    z_l, sig_t, u_l, sig_e = [], [], [], []
+    total_sig = 0
+    for i, z in enumerate(pts):
         if i > 0:
-            dz = z - puntos[i-1]
-            z_m = (z + puntos[i-1])/2
+            dz = z - pts[i-1]
+            z_m = (z + pts[i-1])/2
             h_acc = 0
-            for d in datos:
-                h_acc += d['h']
-                if z_m <= h_acc: acu += dz * d['g']; break
-        u = (z - nf) * 9.81 if z > nf else 0
-        z_l.append(z); st_l.append(acu); u_l.append(u); se_l.append(acu - u)
+            for c in capas:
+                h_acc += c['h']
+                if z_m <= h_acc: total_sig += dz * c['g']; break
+        pres_u = (z - nf) * 9.81 if z > nf else 0
+        z_l.append(z); sig_t.append(total_sig); u_l.append(pres_u); sig_e.append(total_sig - pres_u)
 
-    with cb:
-        df_e = pd.DataFrame({"Z(m)": z_l, "σ Total": st_l, "u": u_l, "σ' Efec": se_l})
-        st.dataframe(df_e); st.session_state.res_e = df_e
+    with col_b:
+        df_esf = pd.DataFrame({"Z (m)": z_l, "Total (kPa)": sig_t, "u (kPa)": u_l, "Efectivo (kPa)": sig_e})
+        st.dataframe(df_esf, use_container_width=True)
+        st.session_state.final_e = df_esf
         fig_e = go.Figure()
-        fig_e.add_trace(go.Scatter(x=st_l, y=z_l, name='σ Total', line=dict(color='brown')))
+        fig_e.add_trace(go.Scatter(x=sig_t, y=z_l, name='σ Total', line=dict(color='brown')))
         fig_e.add_trace(go.Scatter(x=u_l, y=z_l, name='u', line=dict(color='blue')))
-        fig_e.add_trace(go.Scatter(x=se_l, y=z_l, name="σ' Efec", fill='tonextx', line=dict(color='green')))
-        fig_e.update_yaxes(autorange="reversed"); st.plotly_chart(fig_e)
+        fig_e.add_trace(go.Scatter(x=sig_e, y=z_l, name="σ' Efectivo", fill='tonextx', line=dict(color='green')))
+        fig_e.update_yaxes(autorange="reversed", title="Profundidad (m)")
+        st.plotly_chart(fig_e, use_container_width=True)
 
 # --- PESTAÑA 3: PLASTICIDAD ---
 with tabs[2]:
-    st.subheader("📈 Plasticidad")
-    ll = st.number_input("Límite Líquido", 0, 150, 40)
-    lp = st.number_input("Límite Plástico", 0, 100, 20)
+    st.subheader("📈 Carta de Plasticidad (SUCS)")
+    c_ll, c_lp = st.columns(2)
+    ll = c_ll.number_input("Límite Líquido (LL)", 0, 150, 40)
+    lp = c_lp.number_input("Límite Plástico (LP)", 0, 100, 20)
     ip = ll - lp
-    st.metric("Índice de Plasticidad", ip)
+    st.metric("Índice de Plasticidad (IP)", ip)
+    
     xv = np.linspace(0, 100, 100)
+    y_a = 0.73 * (xv - 20)
     fig_p = go.Figure()
-    fig_p.add_trace(go.Scatter(x=xv, y=0.73*(xv-20), name='Línea A', line=dict(color='black')))
-    fig_p.add_trace(go.Scatter(x=[ll], y=[ip], mode='markers', marker=dict(size=12, color='red'), name="Suelo"))
-    st.plotly_chart(fig_p); st.session_state.res_p = pd.DataFrame({"Dato": ["LL", "LP", "IP"], "Valor": [ll, lp, ip]})
+    fig_p.add_trace(go.Scatter(x=xv, y=y_a, name='Línea A', line=dict(color='black')))
+    fig_p.add_trace(go.Scatter(x=[ll], y=[ip], mode='markers+text', text="Suelo", textposition="top right", marker=dict(size=12, color='red')))
+    fig_p.update_xaxes(title="Límite Líquido", range=[0, 100])
+    fig_p.update_yaxes(title="Índice de Plasticidad", range=[0, 60])
+    st.plotly_chart(fig_p)
+    st.session_state.final_p = pd.DataFrame({"Variable": ["LL", "LP", "IP"], "Valor": [ll, lp, ip]})
 
-# --- PESTAÑA 4: EXCEL ---
+# --- PESTAÑA 4: REPORTE ---
 with tabs[3]:
-    if st.button("📊 Generar Excel"):
-        buf = io.BytesIO()
-        with pd.ExcelWriter(buf, engine='xlsxwriter') as wr:
-            if "res_g" in st.session_state: pd.DataFrame([{"Prop": LABELS[k], "Val": st.session_state.res_g[k]} for k in LABELS]).to_excel(wr, sheet_name='Gravimetria')
-            if "res_e" in st.session_state: st.session_state.res_e.to_excel(wr, sheet_name='Esfuerzos')
-            if "res_p" in st.session_state: st.session_state.res_p.to_excel(wr, sheet_name='Plasticidad')
-        st.download_button("💾 Descargar", buf.getvalue(), "Reporte.xlsx")
+    if st.button("📊 Generar Reporte Excel"):
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            if "final_g" in st.session_state: 
+                pd.DataFrame([{"Propiedad": LABELS[k], "Valor": st.session_state.final_g[k]} for k in LABELS]).to_excel(writer, sheet_name='Gravimetria', index=False)
+            if "final_e" in st.session_state: st.session_state.final_e.to_excel(writer, sheet_name='Esfuerzos', index=False)
+            if "final_p" in st.session_state: st.session_state.final_p.to_excel(writer, sheet_name='Plasticidad', index=False)
+        st.download_button("💾 Descargar Excel", output.getvalue(), "Reporte_Geotecnico.xlsx")
         
