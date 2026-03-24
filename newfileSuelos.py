@@ -4,283 +4,208 @@ import plotly.graph_objects as go
 import numpy as np
 import io
 
-# 1. CONFIGURACIÓN DE LA PÁGINA
+# 1. CONFIGURACIÓN
 st.set_page_config(page_title="Geotecnia Suite Master v23.4", layout="wide", page_icon="🏗️")
 
-# Estilo CSS para mejorar la estética
-st.markdown("""
-    <style>
-    .main { background-color: #f5f7f9; }
-    .stMetric { background-color: #ffffff; padding: 10px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- SIDEBAR / CONTROL ---
 st.sidebar.title("👨‍🏫 Panel de Control")
 modo = st.sidebar.radio("Selecciona el Modo:", ("Metas (Laboratorio)", "Académico (Base Vs=1)"))
 st.sidebar.markdown("---")
-st.sidebar.info("Este software permite simular cambios en las fases del suelo manteniendo la consistencia física.")
 
 st.title(f"🏗️ Geotecnia Master - Modo {modo.split()[0]}")
 
-# --- PESTAÑAS PRINCIPALES ---
+# --- PESTAÑAS ---
 tabs = st.tabs(["🧩 Gravimetría & Fases", "🗂️ Perfil de Presiones", "📈 Plasticidad & SUCS", "📥 Reporte Final"])
 
-# --- PESTAÑA 1: GRAVIMETRÍA Y DIAGRAMA DE FASES ---
+# --- PESTAÑA 1: GRAVIMETRÍA ---
 with tabs[0]:
     diccionario_maestro = {
-        "gs": "Gs (Gravedad específica)",
-        "e": "e (Relación de vacíos)",
-        "n": "n (Porosidad %)",
-        "w": "w (Contenido de humedad %)",
-        "s": "S (Grado de saturación %)",
-        "wm": "Wt (Peso total)",
-        "ws": "Ws (Peso sólidos)",
-        "ww": "Ww (Peso agua)",
-        "vt": "Vt (Volumen total)",
-        "vs": "Vs (Volumen sólidos)",
-        "vv": "Vv (Volumen vacíos)",
-        "vw": "Vw (Volumen agua)",
-        "va": "Va (Volumen aire)",
-        "gh": "γ (Unitario húmedo)",
-        "gd": "γd (Unitario seco)"
+        "gs": "Gs (Gravedad específica)", "e": "e (Relación de vacíos)", "n": "n (Porosidad %)",
+        "w": "w (Contenido de humedad %)", "s": "S (Grado de saturación %)", "wm": "Wt (Peso total)",
+        "ws": "Ws (Peso sólidos)", "ww": "Ww (Peso agua)", "vt": "Vt (Volumen total)",
+        "vs": "Vs (Volumen sólidos)", "vv": "Vv (Volumen vacíos)", "vw": "Vw (Volumen agua)",
+        "va": "Va (Volumen aire)", "gh": "γ (Unitario húmedo)", "gd": "γd (Unitario seco)"
     }
 
     st.subheader("📥 1. Entrada de Datos Iniciales")
-    col_sel, col_empty = st.columns([2, 1])
-    with col_sel:
-        seleccionados = st.multiselect(
-            "Selecciona las variables que conoces de tu muestra:",
-            options=list(diccionario_maestro.keys()),
-            format_func=lambda x: diccionario_maestro[x]
-        )
-
+    seleccionados = st.multiselect("Variables conocidas:", options=list(diccionario_maestro.keys()), format_func=lambda x: diccionario_maestro[x])
+    
     inputs = {}
-    if seleccionados:
-        cols = st.columns(3)
-        for i, clave in enumerate(seleccionados):
-            inputs[clave] = cols[i % 3].number_input(
-                f"{diccionario_maestro[clave]}", 
-                value=0.0, 
-                format="%.4f",
-                key=f"input_{clave}"
-            )
+    cols_in = st.columns(3)
+    for i, clave in enumerate(seleccionados):
+        inputs[clave] = cols_in[i%3].number_input(f"{diccionario_maestro[clave]}", value=0.0, format="%.4f", key=f"in_{clave}")
 
-    if st.button("🚀 Calcular Base Geotécnica"):
-        d = {k: 0.0 for k in diccionario_maestro.keys()}
+    if st.button("🚀 Calcular Base"):
+        tiene_peso = any(k in inputs and inputs[k] > 0 for k in ['ws', 'wm', 'ww'])
+        tiene_volumen = any(k in inputs and inputs[k] > 0 for k in ['vs', 'vt', 'vv', 'vw', 'va'])
         
-        if modo == "Académico (Base Vs=1)":
-            d['vs'] = 1.0
+        if modo == "Metas (Laboratorio)" and not (tiene_peso or tiene_volumen):
+            st.error("❌ Datos insuficientes para magnitudes reales. Por favor, ingresa al menos un Peso o un Volumen.")
+            st.stop()
+
+        d = {k: 0.0 for k in diccionario_maestro.keys()}
+        if modo == "Académico (Base Vs=1)": d['vs'] = 1.0
         
         for k, v in inputs.items():
-            if k in ['w', 'n', 's'] and v > 1.5:
-                d[k] = v / 100
-            else:
-                d[k] = v
-
-        # --- MOTOR DE RETROALIMENTACIÓN RECURSIVO (50 CICLOS) ---
+            d[k] = v / 100 if k in ['w', 'n', 's'] and v > 1.0 else v
+        
+        # MOTOR DE INFERENCIA ESTRICTO Y COMPLETO
         for _ in range(50):
+            # Fase 1: Pesos, Gs y Vs
             if d['gs'] > 0 and d['ws'] > 0 and d['vs'] == 0: d['vs'] = d['ws'] / d['gs']
             if d['gs'] > 0 and d['vs'] > 0 and d['ws'] == 0: d['ws'] = d['gs'] * d['vs']
             if d['ws'] > 0 and d['vs'] > 0 and d['gs'] == 0: d['gs'] = d['ws'] / d['vs']
+            
+            # Fase 2: Humedad y Peso de Agua
             if d['ws'] > 0 and d['w'] > 0 and d['ww'] == 0: d['ww'] = d['ws'] * d['w']
             if d['ws'] > 0 and d['ww'] > 0 and d['w'] == 0: d['w'] = d['ww'] / d['ws']
             if d['ww'] > 0: d['vw'] = d['ww']
-            if d['vw'] > 0: d['ww'] = d['vw']
+            
+            # Fase 3: CONEXIONES DE VOLÚMENES (La clave de tu ejercicio)
             if d['vt'] > 0 and d['vs'] > 0 and d['vv'] == 0: d['vv'] = d['vt'] - d['vs']
             if d['vt'] > 0 and d['vv'] > 0 and d['vs'] == 0: d['vs'] = d['vt'] - d['vv']
             if d['vs'] > 0 and d['vv'] > 0 and d['vt'] == 0: d['vt'] = d['vs'] + d['vv']
+            
+            # Fase 4: Relaciones de Vacíos y Porosidad
             if d['vv'] > 0 and d['vs'] > 0 and d['e'] == 0: d['e'] = d['vv'] / d['vs']
             if d['e'] > 0 and d['vs'] > 0 and d['vv'] == 0: d['vv'] = d['e'] * d['vs']
             if d['vt'] > 0 and d['vv'] > 0 and d['n'] == 0: d['n'] = d['vv'] / d['vt']
             if d['e'] > 0 and d['n'] == 0: d['n'] = d['e'] / (1 + d['e'])
             if d['n'] > 0 and d['e'] == 0: d['e'] = d['n'] / (1 - d['n'])
+            
+            # Fase 5: Saturación
             if d['vw'] > 0 and d['vv'] > 0 and d['s'] == 0: d['s'] = d['vw'] / d['vv']
             if d['s'] > 0 and d['vv'] > 0 and d['vw'] == 0: d['vw'] = d['s'] * d['vv']
+            
+            # Fase 6: Pesos Totales y Aire
             if d['wm'] > 0 and d['ws'] > 0 and d['ww'] == 0: d['ww'] = d['wm'] - d['ws']
-            if d['wm'] > 0 and d['ww'] > 0 and d['ws'] == 0: d['ws'] = d['wm'] - d['ww']
             if d['ws'] > 0 and d['ww'] > 0 and d['wm'] == 0: d['wm'] = d['ws'] + d['ww']
-            if d['vv'] > 0 and d['vw'] > 0 and d['va'] == 0: d['va'] = max(0.0, d['vv'] - d['vw'])
+            if d['vv'] > 0 and d['vw'] > 0 and d['va'] == 0: d['va'] = d['vv'] - d['vw']
+            
+            # Fase 7: Pesos Unitarios
             if d['wm'] > 0 and d['vt'] > 0 and d['gh'] == 0: d['gh'] = d['wm'] / d['vt']
             if d['ws'] > 0 and d['vt'] > 0 and d['gd'] == 0: d['gd'] = d['ws'] / d['vt']
 
         st.session_state.base_calc = d.copy()
-        st.session_state.slider_key = np.random.randint(1, 9999)
+        st.session_state.slider_key = np.random.randint(1, 999)
         st.rerun()
 
     if 'base_calc' in st.session_state:
         st.markdown("---")
-        col_sim, col_res = st.columns([1.2, 1.8])
+        c_sim, c_res = st.columns([1.2, 1.8])
         bc = st.session_state.base_calc
         sk = st.session_state.slider_key
 
-        with col_sim:
-            st.subheader("🕹️ 2. Simulador de Estados")
-            # ELIMINADOS VALORES POR DEFECTO: Ahora nacen de lo calculado o 0.0
-            e_val = st.slider("Relación de vacíos (e)", 0.0, 5.0, float(bc['e']), key=f"s_e_{sk}")
-            w_val = st.slider("Contenido de humedad (w %)", 0.0, 100.0, float(bc['w']*100), key=f"s_w_{sk}") / 100
-            s_val = st.slider("Grado de saturación (S %)", 0.0, 100.0, float(bc['s']*100), key=f"s_s_{sk}") / 100
-            ws_val = st.slider("Peso de los sólidos (Ws)", 0.0, 5000.0, float(bc['ws']), key=f"s_ws_{sk}")
+        with c_sim:
+            st.subheader("🕹️ 2. Simulador")
+            
+            e_def = float(bc['e'])
+            w_def = float(bc['w'] * 100)
+            s_def = float(bc['s'] * 100)
+            ws_def = float(bc['ws'])
+            if ws_def == 0 and bc['wm'] > 0: ws_def = bc['wm'] / (1 + bc['w'])
+            
+            errores = []
+            if e_def == 0: errores.append("Relación de vacíos (e)")
+            if ws_def == 0 and modo == "Metas (Laboratorio)": errores.append("Peso de Sólidos (Ws)")
+            
+            if errores:
+                st.error(f"⚠️ **Faltan datos:** No se pudo deducir {', '.join(errores)}.")
 
+            e_val = st.slider("Relación de vacíos (e)", 0.0, 5.0, e_def, key=f"sl_e_{sk}")
+            w_val = st.slider("Humedad (w %)", 0.0, 100.0, w_def, key=f"sl_w_{sk}") / 100
+            s_val = st.slider("Saturación (S %)", 0.0, 100.0, s_def, key=f"sl_s_{sk}") / 100
+            ws_val = st.slider("Peso Sólidos (Ws)", 0.0, 5000.0, ws_def, key=f"sl_ws_{sk}")
+            
+            # Recálculo Final basado en Sliders
             f = {k: 0.0 for k in diccionario_maestro.keys()}
-            f['gs'] = bc['gs']
+            f['gs'] = bc['gs'] if bc['gs'] > 0 else 2.65
             f['e'], f['ws'] = e_val, ws_val
             
             if modo == "Académico (Base Vs=1)":
                 f['vs'] = 1.0
-                f['ws'] = f['gs'] * f['vs'] if f['gs'] > 0 else 0
+                f['ws'] = f['gs'] * f['vs']
             else:
                 f['vs'] = f['ws'] / f['gs'] if f['gs'] > 0 else 0
             
             f['vv'] = f['e'] * f['vs']
-            f['vt'] = f['vs'] + f['vv']
             
             if s_val > 0:
-                f['s'] = s_val
-                f['vw'] = f['s'] * f['vv']
+                f['s'], f['vw'] = s_val, s_val * f['vv']
                 f['ww'] = f['vw']
                 f['w'] = f['ww'] / f['ws'] if f['ws'] > 0 else 0
             else:
-                f['w'] = w_val
-                f['ww'] = f['ws'] * f['w']
+                f['w'], f['ww'] = w_val, f['ws'] * w_val
                 f['vw'] = f['ww']
                 f['s'] = f['vw'] / f['vv'] if f['vv'] > 0 else 0
 
-            f['va'] = max(0.0, f['vv'] - f['vw'])
-            f['wm'] = f['ws'] + f['ww']
-            f['n'] = f['vv'] / f['vt'] if f['vt'] > 0 else 0
-            f['gh'] = f['wm'] / f['vt'] if f['vt'] > 0 else 0
-            f['gd'] = f['ws'] / f['vt'] if f['vt'] > 0 else 0
+            f['vt'], f['va'] = f['vs'] + f['vv'], max(0.0, f['vv'] - f['vw'])
+            f['wm'], f['n'] = f['ws'] + f['ww'], (f['vv'] / (f['vs'] + f['vv']) if (f['vs'] + f['vv']) > 0 else 0)
 
-            if st.button("🔄 Resetear Muestra"):
+            if st.button("🔄 Reiniciar"):
                 del st.session_state.base_calc
                 st.rerun()
 
-        with col_res:
-            st.subheader("📊 Resultados de las Fases")
-            res_data = {
-                "Propiedad": [diccionario_maestro[k] for k in diccionario_maestro.keys()],
-                "Valor": [
-                    f"{f['gs']:.3f}", f"{f['e']:.4f}", f"{f['n']*100:.2f}%", f"{f['w']*100:.2f}%",
-                    f"{f['s']*100:.2f}%", f"{f['wm']:.2f} g", f"{f['ws']:.2f} g", f"{f['ww']:.2f} g",
-                    f"{f['vt']:.2f} cm³", f"{f['vs']:.2f} cm³", f"{f['vv']:.2f} cm³", f"{f['vw']:.2f} cm³",
-                    f"{f['va']:.2f} cm³", f"{f['gh']*9.81:.2f} kN/m³", f"{f['gd']*9.81:.2f} kN/m³"
-                ]
-            }
-            st.table(pd.DataFrame(res_data))
-            st.session_state.df_excel = pd.DataFrame(res_data)
+        with c_res:
+            st.subheader("📊 Resultados")
+            gamma_h = (f['wm']/f['vt'])*9.81 if f['vt'] > 0 else 0
+            gamma_d = (f['ws']/f['vt'])*9.81 if f['vt'] > 0 else 0
+            res_df = pd.DataFrame({"Propiedad": list(diccionario_maestro.values()), 
+                "Valor": [f"{f['gs']:.3f}", f"{f['e']:.4f}", f"{f['n']*100:.2f}%", f"{f['w']*100:.2f}%", f"{f['s']*100:.2f}%", f"{f['wm']:.2f} g", f"{f['ws']:.2f} g", f"{f['ww']:.2f} g", f"{f['vt']:.2f} cm³", f"{f['vs']:.2f} cm³", f"{f['vv']:.2f} cm³", f"{f['vw']:.2f} cm³", f"{f['va']:.2f} cm³", f"{gamma_h:.2f} kN/m³", f"{gamma_d:.2f} kN/m³"]})
+            st.table(res_df)
+            st.session_state.df_excel = res_df
+            fig = go.Figure(data=[go.Bar(name='Sólidos', x=['Fases'], y=[f['vs']], marker_color='#7E5109'), go.Bar(name='Agua', x=['Fases'], y=[f['vw']], marker_color='#3498DB'), go.Bar(name='Aire', x=['Fases'], y=[f['va']], marker_color='#BDC3C7')])
+            fig.update_layout(barmode='stack', height=350); st.plotly_chart(fig, use_container_width=True)
 
-            fig = go.Figure(data=[
-                go.Bar(name='Sólidos', x=['Fases'], y=[f['vs']], marker_color='#7E5109', width=0.5),
-                go.Bar(name='Agua', x=['Fases'], y=[f['vw']], marker_color='#3498DB', width=0.5),
-                go.Bar(name='Aire', x=['Fases'], y=[f['va']], marker_color='#BDC3C7', width=0.5)
-            ])
-            fig.update_layout(barmode='stack', title='Distribución de Volúmenes', height=400, showlegend=True)
-            st.plotly_chart(fig, use_container_width=True)
-
-# --- PESTAÑA 2: PERFIL DE PRESIONES (RESTAURADO) ---
+# --- PESTAÑAS RESTANTES ---
 with tabs[1]:
-    st.header("🗂️ Cálculo de Esfuerzos Geostáticos")
-    col_p1, col_p2 = st.columns([1, 2])
-    
-    with col_p1:
-        n_estratos = st.number_input("Número de estratos:", 1, 10, 2)
-        nf = st.number_input("Nivel Freático (m):", 0.0, 100.0, 2.0)
-        
-        estratos_data = []
-        for i in range(int(n_estratos)):
-            st.markdown(f"**Estrato {i+1}**")
-            h = st.number_input(f"Espesor H (m) - {i+1}", 0.1, 50.0, 3.0, key=f"h_{i}")
-            gamma = st.number_input(f"Peso Unitario γ (kN/m³) - {i+1}", 1.0, 30.0, 18.0, key=f"g_{i}")
-            estratos_data.append({'h': h, 'g': gamma})
+    st.header("🗂️ Esfuerzos Geostáticos")
+    cp1, cp2 = st.columns([1, 2])
+    with cp1:
+        n_est = st.number_input("Número de Estratos", 1, 5, 2)
+        nf = st.number_input("NF (m)", 0.0, 50.0, 2.0)
+        estratos = []
+        for i in range(int(n_est)):
+            h = st.number_input(f"H{i+1}", 0.1, 20.0, 3.0, key=f"pres_h_{i}")
+            g = st.number_input(f"γ{i+1}", 1.0, 22.0, 18.0, key=f"pres_g_{i}")
+            estratos.append({'h': h, 'g': g})
+    z_pts = sorted(list(set([0.0, nf] + [sum(e['h'] for e in estratos[:i+1]) for i in range(len(estratos))])))
+    z_pts = [p for p in z_pts if p <= sum(e['h'] for e in estratos)]
+    st_l, u_l, se_l, s_acu = [], [], [], 0
+    for i, z in enumerate(z_pts):
+        if i > 0:
+            dz = z - z_pts[i-1]
+            z_m = (z + z_pts[i-1])/2
+            z_t = 0
+            for e in estratos:
+                if z_m <= z_t + e['h']: s_acu += dz * e['g']; break
+                z_t += e['h']
+        u_p = (z - nf) * 9.81 if z > nf else 0
+        st_l.append(s_acu); u_l.append(u_p); se_l.append(s_acu - u_p)
+    with cp2:
+        df_p = pd.DataFrame({"Z (m)": z_pts, "σ Total": st_l, "u": u_l, "σ' Ef.": se_l})
+        st.dataframe(df_p); fig_p = go.Figure()
+        fig_p.add_trace(go.Scatter(x=st_l, y=z_pts, name='Total', line=dict(color='brown')))
+        fig_p.add_trace(go.Scatter(x=u_l, y=z_pts, name='u', line=dict(color='blue', dash='dash')))
+        fig_p.add_trace(go.Scatter(x=se_l, y=z_pts, name='Efectivo', fill='tonextx', line=dict(color='green')))
+        fig_p.update_yaxes(autorange="reversed"); st.plotly_chart(fig_p)
 
-    z_acum_frontera = 0
-    fronteras = []
-    for e in estratos_data:
-        z_acum_frontera += e['h']
-        fronteras.append(z_acum_frontera)
-    
-    todos_puntos = sorted(list(set([0, nf] + fronteras)))
-    todos_puntos = [p for p in todos_puntos if p <= sum(e['h'] for e in estratos_data)]
-
-    st_list, u_list, se_list = [], [], []
-
-    for z in todos_puntos:
-        current_sigma = 0
-        z_ref = 0
-        for e in estratos_data:
-            if z > z_ref:
-                espesor = min(e['h'], z - z_ref)
-                current_sigma += espesor * e['g']
-                z_ref += e['h']
-        
-        current_u = (z - nf) * 9.81 if z > nf else 0
-        st_list.append(current_sigma)
-        u_list.append(current_u)
-        se_list.append(current_sigma - current_u)
-
-    with col_p2:
-        df_presiones = pd.DataFrame({
-            "Profundidad (m)": todos_puntos,
-            "σ Total (kPa)": st_list,
-            "u (kPa)": u_list,
-            "σ' Efectivo (kPa)": se_list
-        })
-        st.dataframe(df_presiones.style.format("{:.2f}"))
-        
-        fig_p = go.Figure()
-        fig_p.add_trace(go.Scatter(x=st_list, y=todos_puntos, name='σ Total', line=dict(color='brown', width=3)))
-        fig_p.add_trace(go.Scatter(x=u_list, y=todos_puntos, name='u (Agua)', line=dict(color='blue', dash='dash')))
-        fig_p.add_trace(go.Scatter(x=se_list, y=todos_puntos, name="σ' Efectivo", fill='tonextx', line=dict(color='green', width=3)))
-        
-        fig_p.update_yaxes(autorange="reversed", title="Profundidad (m)")
-        fig_p.update_xaxes(title="Presión (kPa)", side="top")
-        fig_p.update_layout(height=500, title="Perfil de Esfuerzos Geostáticos")
-        st.plotly_chart(fig_p, use_container_width=True)
-
-# --- PESTAÑA 3: PLASTICIDAD Y CLASIFICACIÓN (RESTAURADO) ---
 with tabs[2]:
-    st.header("📈 Límites de Atterberg y Clasificación SUCS")
-    col_c1, col_c2 = st.columns([1, 2])
-    
-    with col_c1:
-        ll = st.number_input("Límite Líquido (LL):", 0, 150, 40)
-        lp = st.number_input("Límite Plástico (LP):", 0, 100, 20)
-        p200 = st.number_input("% Pasa Tamiz No. 200:", 0.0, 100.0, 60.0)
-        
-        ip = ll - lp
-        st.metric("Índice de Plasticidad (IP)", f"{ip}%")
-        
-        if p200 >= 50:
-            if ll < 50:
-                sucs = "CL o ML" if ip > 7 and ip >= 0.73*(ll-20) else "ML o OL"
-            else:
-                sucs = "CH o MH" if ip >= 0.73*(ll-20) else "MH o OH"
-            st.success(f"Suelo Fino: **{sucs}**")
-        else:
-            st.info("Suelo Grueso (Requiere Granulometría Completa)")
+    st.header("📈 Plasticidad")
+    cl1, cl2 = st.columns([1, 2])
+    with cl1:
+        ll = st.number_input("LL", 0, 120, 40); lp = st.number_input("LP", 0, 100, 20)
+        ip = ll - lp; st.metric("IP", ip)
+    with cl2:
+        xv = np.linspace(0, 100, 100); fig_c = go.Figure()
+        fig_c.add_trace(go.Scatter(x=xv, y=0.73*(xv-20), name='Línea A', line=dict(color='black')))
+        fig_c.add_trace(go.Scatter(x=[ll], y=[ip], mode='markers', marker=dict(size=12, color='red')))
+        fig_c.update_xaxes(title="LL"); fig_c.update_yaxes(title="IP"); st.plotly_chart(fig_c)
 
-    with col_c2:
-        ll_plot = np.linspace(0, 100, 100)
-        linea_a = 0.73 * (ll_plot - 20)
-        linea_a = np.maximum(0, linea_a)
-        
-        fig_c = go.Figure()
-        fig_c.add_trace(go.Scatter(x=ll_plot, y=linea_a, name='Línea A', line=dict(color='black')))
-        fig_c.add_trace(go.Scatter(x=[ll], y=[ip], name='Tu Muestra', mode='markers', marker=dict(size=15, color='red')))
-        
-        fig_c.update_layout(title="Carta de Plasticidad", xaxis_title="LL", yaxis_title="IP", height=450)
-        fig_c.add_shape(type="line", x0=50, y0=0, x1=50, y1=60, line=dict(color="Gray", dash="dash"))
-        st.plotly_chart(fig_c, use_container_width=True)
-
-# --- PESTAÑA 4: REPORTE FINAL ---
 with tabs[3]:
-    st.header("📥 Generación de Reporte Técnico")
-    if 'df_excel' in st.session_state:
-        st.dataframe(st.session_state.df_excel)
+    st.header("📥 Descargar Reporte")
+    if st.button("📊 Generar Excel"):
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            st.session_state.df_excel.to_excel(writer, index=False, sheet_name='Resultados_Fases')
-            if 'df_presiones' in locals():
-                df_presiones.to_excel(writer, index=False, sheet_name='Perfil_Esfuerzos')
-        st.download_button(label="💾 Descargar Reporte en Excel", data=output.getvalue(), file_name="Reporte_Geotecnico.xlsx")
+            if 'df_excel' in st.session_state: st.session_state.df_excel.to_excel(writer, sheet_name='Resultados')
+        st.download_button("Descargar_Reporte.xlsx", output.getvalue(), "Reporte_Geotecnia.xlsx")
+            
