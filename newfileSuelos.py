@@ -4,8 +4,8 @@ import plotly.graph_objects as go
 import numpy as np
 import io
 
-# 1. CONFIGURACIÓN DE PÁGINA Y ESTILO
-st.set_page_config(page_title="Geotecnia Suite Master v14.5", layout="wide", page_icon="🏗️")
+# 1. CONFIGURACIÓN DE PÁGINA
+st.set_page_config(page_title="Geotecnia Suite Master v15.0", layout="wide", page_icon="🏗️")
 
 # Barra lateral con personalidad
 st.sidebar.title("👨‍🏫 Panel de Control")
@@ -30,37 +30,45 @@ with tabs[0]:
 
     if modo == "Académico (Base Vs=1)":
         st.subheader("📖 Análisis Teórico (Base Vs = 1 cm³)")
+        st.write("Ingresa los parámetros conocidos para deducir las relaciones de fase:")
         col_ac1, col_ac2 = st.columns(2)
         with col_ac1:
-            gs_ac = st.number_input("Gs (Gravedad específica)", value=2.70, format="%.3f")
-            e_ac = st.number_input("e (Relación de vacíos)", value=0.60, format="%.3f")
+            # Valores inicializados en 0.0 para que tú los escojas
+            gs_ac = st.number_input("Gs (Gravedad específica)", value=0.0, format="%.3f")
+            e_ac = st.number_input("e (Relación de vacíos)", value=0.0, format="%.3f")
         with col_ac2:
             w_ac = st.number_input("w (Humedad %)", value=0.0) / 100
-            s_ac = st.number_input("S (Saturación %)", value=100.0) / 100
+            s_ac = st.number_input("S (Saturación %)", value=0.0) / 100
         
         if st.button("🚀 Calcular Relaciones Teóricas"):
-            d = {k: 0.0 for k in diccionario_maestro.keys()}
-            d['vs'] = 1.0
-            d['gs'] = gs_ac
-            d['ws'] = gs_ac * 1.0  # Asumiendo γw = 1g/cm³
-            d['e'] = e_ac
-            d['vv'] = e_ac * d['vs']
-            d['vt'] = d['vs'] + d['vv']
-            d['n'] = d['e'] / (1 + d['e'])
-            if w_ac > 0:
-                d['w'] = w_ac
-                d['ww'] = d['ws'] * w_ac
-                d['vw'] = d['ww'] / 1.0
-                d['s'] = d['vw'] / d['vv'] if d['vv'] > 0 else 0
+            if gs_ac == 0:
+                st.error("¡Oye! Necesito al menos la Gs para empezar a trabajar. No puedo adivinarla todavía.")
             else:
-                d['s'] = s_ac
-                d['vw'] = d['vv'] * s_ac
-                d['ww'] = d['vw'] * 1.0
-                d['w'] = d['ww'] / d['ws'] if d['ws'] > 0 else 0
-            d['va'] = max(0.0, d['vv'] - d['vw'])
-            d['wm'] = d['ws'] + d['ww']
-            st.session_state.base_data = d.copy()
-            st.session_state.live_data = d.copy()
+                d = {k: 0.0 for k in diccionario_maestro.keys()}
+                d['vs'] = 1.0
+                d['gs'] = gs_ac
+                d['ws'] = gs_ac * 1.0  # γw = 1g/cm³
+                d['e'] = e_ac
+                d['vv'] = e_ac * d['vs']
+                d['vt'] = d['vs'] + d['vv']
+                d['n'] = d['e'] / (1 + d['e']) if (1 + d['e']) > 0 else 0
+                
+                # Lógica de prioridad: Si das humedad, calculo saturación; si no, viceversa.
+                if w_ac > 0:
+                    d['w'] = w_ac
+                    d['ww'] = d['ws'] * w_ac
+                    d['vw'] = d['ww'] / 1.0
+                    d['s'] = d['vw'] / d['vv'] if d['vv'] > 0 else 0
+                else:
+                    d['s'] = s_ac
+                    d['vw'] = d['vv'] * s_ac
+                    d['ww'] = d['vw'] * 1.0
+                    d['w'] = d['ww'] / d['ws'] if d['ws'] > 0 else 0
+                
+                d['va'] = max(0.0, d['vv'] - d['vw'])
+                d['wm'] = d['ws'] + d['ww']
+                st.session_state.base_data = d.copy()
+                st.session_state.live_data = d.copy()
 
     else: # MODO METAS
         st.subheader("🧪 Procesamiento de Datos Reales")
@@ -74,7 +82,7 @@ with tabs[0]:
             d = {k: inputs.get(k, 0.0) for k in diccionario_maestro.keys()}
             for pct in ['w', 'n', 's']:
                 if d[pct] > 1.0: d[pct] /= 100
-            for _ in range(30): # Motor iterativo
+            for _ in range(30):
                 if d['ws'] > 0 and d['gs'] > 0: d['vs'] = d['ws'] / d['gs']
                 if d['wm'] > 0 and d['ws'] > 0: d['ww'] = d['wm'] - d['ws']
                 if d['ws'] > 0 and d['w'] > 0: d['ww'] = d['ws'] * d['w']
@@ -88,19 +96,19 @@ with tabs[0]:
             st.session_state.base_data = d.copy()
             st.session_state.live_data = d.copy()
 
+    # --- SIMULADOR COMÚN ---
     if 'live_data' in st.session_state:
         ld = st.session_state.live_data
         st.markdown("---")
-        if st.button("🔄 Resetear"):
+        if st.button("🔄 Limpiar y Resetear"):
             st.session_state.live_data = st.session_state.base_data.copy()
             st.rerun()
 
         c_sim, c_res = st.columns([1.2, 1.8])
         with c_sim:
-            st.subheader("🕹️ Simulador Dinámico")
-            ld['e'] = st.slider("Relación vacíos (e)", 0.01, 5.0, float(ld['e']))
+            st.subheader("🕹️ Ajustes")
+            ld['e'] = st.slider("Relación vacíos (e)", 0.01, 5.0, float(ld['e']) if ld['e'] > 0 else 0.5)
             ld['w'] = st.slider("Humedad (%)", 0.0, 100.0, float(ld['w']*100)) / 100
-            # Recálculos automáticos del simulador
             ld['vv'] = ld['vs'] * ld['e']
             ld['ww'] = ld['ws'] * ld['w']
             ld['vw'] = ld['ww'] / 1.0
@@ -131,11 +139,11 @@ with tabs[1]:
     col_p1, col_p2 = st.columns([1, 2])
     with col_p1:
         n_estratos = st.number_input("Estratos", 1, 10, 2)
-        nf = st.number_input("Nivel Freático (m)", 0.0, 100.0, 2.0)
+        nf = st.number_input("Nivel Freático (m)", 0.0, 100.0, 0.0)
         datos_estratos = []
         for i in range(int(n_estratos)):
-            h = st.number_input(f"H {i+1} (m)", 0.1, 50.0, 3.0, key=f"z_h{i}")
-            g = st.number_input(f"γ {i+1} (kN/m³)", 10.0, 25.0, 18.0, key=f"z_g{i}")
+            h = st.number_input(f"H {i+1} (m)", 0.0, 50.0, 0.0, key=f"z_h{i}")
+            g = st.number_input(f"γ {i+1} (kN/m³)", 0.0, 25.0, 0.0, key=f"z_g{i}")
             datos_estratos.append({'h': h, 'g': g})
 
     puntos = sorted(list(set([0.0, nf] + [sum(e['h'] for e in datos_estratos[:i+1]) for i in range(len(datos_estratos))])))
@@ -169,10 +177,11 @@ with tabs[2]:
     st.header("Clasificación SUCS")
     cl1, cl2 = st.columns([1, 2])
     with cl1:
-        ll = st.number_input("LL", 0, 150, 45); lp = st.number_input("LP", 0, 100, 20); ip = ll - lp
+        ll = st.number_input("LL", 0, 150, 0); lp = st.number_input("LP", 0, 100, 0); ip = ll - lp
         st.metric("IP", ip)
         linea_a = 0.73 * (ll - 20)
-        if ll < 50:
+        if ll == 0: s_tipo = "Pendiente de datos"
+        elif ll < 50:
             if ip > 7 and ip >= linea_a: s_tipo = "CL"
             elif ip < 4 or ip < linea_a: s_tipo = "ML"
             else: s_tipo = "CL-ML"
@@ -185,7 +194,8 @@ with tabs[2]:
         fig_c = go.Figure()
         x_val = np.linspace(0,100,100)
         fig_c.add_trace(go.Scatter(x=x_val, y=0.73*(x_val-20), name='Línea A', line=dict(color='black')))
-        fig_c.add_trace(go.Scatter(x=[ll], y=[ip], mode='markers', marker=dict(size=15, color='red')))
+        if ll > 0:
+            fig_c.add_trace(go.Scatter(x=[ll], y=[ip], mode='markers', marker=dict(size=15, color='red')))
         fig_c.update_xaxes(title="Límite Líquido", range=[0,100]); fig_c.update_yaxes(title="IP", range=[0,60])
         st.plotly_chart(fig_c, use_container_width=True)
 
@@ -199,4 +209,4 @@ with tabs[3]:
             if 'df_pres_excel' in st.session_state: st.session_state.df_pres_excel.to_excel(writer, sheet_name='Presiones')
             if 'df_lim_excel' in st.session_state: st.session_state.df_lim_excel.to_excel(writer, sheet_name='Plasticidad')
         st.download_button("Descargar_Geotecnia.xlsx", output.getvalue(), "reporte_final.xlsx")
-            
+        
