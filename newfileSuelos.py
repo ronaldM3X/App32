@@ -48,41 +48,40 @@ with tabs[0]:
         for k, v in inputs.items():
             d[k] = v / 100 if k in ['w', 'n', 's'] and v > 1.0 else v
         
-        # MOTOR DE INFERENCIA UNIFICADO (Sin valores por defecto)
+        # MOTOR DE INFERENCIA ESTRICTO Y COMPLETO
         for _ in range(50):
-            # Relaciones Gs, Ws, Vs
+            # Fase 1: Pesos, Gs y Vs
             if d['gs'] > 0 and d['ws'] > 0 and d['vs'] == 0: d['vs'] = d['ws'] / d['gs']
             if d['gs'] > 0 and d['vs'] > 0 and d['ws'] == 0: d['ws'] = d['gs'] * d['vs']
             if d['ws'] > 0 and d['vs'] > 0 and d['gs'] == 0: d['gs'] = d['ws'] / d['vs']
             
-            # Pesos y Humedad
+            # Fase 2: Humedad y Peso de Agua
             if d['ws'] > 0 and d['w'] > 0 and d['ww'] == 0: d['ww'] = d['ws'] * d['w']
             if d['ws'] > 0 and d['ww'] > 0 and d['w'] == 0: d['w'] = d['ww'] / d['ws']
             if d['ww'] > 0: d['vw'] = d['ww']
             
-            # CONEXIÓN MAESTRA VT - VS (Cierra el ciclo para deducir 'e')
+            # Fase 3: CONEXIONES DE VOLÚMENES (La clave de tu ejercicio)
             if d['vt'] > 0 and d['vs'] > 0 and d['vv'] == 0: d['vv'] = d['vt'] - d['vs']
             if d['vt'] > 0 and d['vv'] > 0 and d['vs'] == 0: d['vs'] = d['vt'] - d['vv']
             if d['vs'] > 0 and d['vv'] > 0 and d['vt'] == 0: d['vt'] = d['vs'] + d['vv']
             
-            # Relaciones de Vacíos
+            # Fase 4: Relaciones de Vacíos y Porosidad
             if d['vv'] > 0 and d['vs'] > 0 and d['e'] == 0: d['e'] = d['vv'] / d['vs']
             if d['e'] > 0 and d['vs'] > 0 and d['vv'] == 0: d['vv'] = d['e'] * d['vs']
             if d['vt'] > 0 and d['vv'] > 0 and d['n'] == 0: d['n'] = d['vv'] / d['vt']
             if d['e'] > 0 and d['n'] == 0: d['n'] = d['e'] / (1 + d['e'])
             if d['n'] > 0 and d['e'] == 0: d['e'] = d['n'] / (1 - d['n'])
             
-            # Saturación
+            # Fase 5: Saturación
             if d['vw'] > 0 and d['vv'] > 0 and d['s'] == 0: d['s'] = d['vw'] / d['vv']
             if d['s'] > 0 and d['vv'] > 0 and d['vw'] == 0: d['vw'] = d['s'] * d['vv']
             
-            # Pesos Totales
+            # Fase 6: Pesos Totales y Aire
             if d['wm'] > 0 and d['ws'] > 0 and d['ww'] == 0: d['ww'] = d['wm'] - d['ws']
-            if d['wm'] > 0 and d['ww'] > 0 and d['ws'] == 0: d['ws'] = d['wm'] - d['ww']
             if d['ws'] > 0 and d['ww'] > 0 and d['wm'] == 0: d['wm'] = d['ws'] + d['ww']
-            
-            # Aire y Unitarios
             if d['vv'] > 0 and d['vw'] > 0 and d['va'] == 0: d['va'] = d['vv'] - d['vw']
+            
+            # Fase 7: Pesos Unitarios
             if d['wm'] > 0 and d['vt'] > 0 and d['gh'] == 0: d['gh'] = d['wm'] / d['vt']
             if d['ws'] > 0 and d['vt'] > 0 and d['gd'] == 0: d['gd'] = d['ws'] / d['vt']
 
@@ -99,7 +98,6 @@ with tabs[0]:
         with c_sim:
             st.subheader("🕹️ 2. Simulador")
             
-            # HERENCIA ESTRICTA SIN VALORES POR DEFECTO
             e_def = float(bc['e'])
             w_def = float(bc['w'] * 100)
             s_def = float(bc['s'] * 100)
@@ -111,17 +109,17 @@ with tabs[0]:
             if ws_def == 0 and modo == "Metas (Laboratorio)": errores.append("Peso de Sólidos (Ws)")
             
             if errores:
-                st.error(f"⚠️ **Faltan datos:** No se pudo calcular {', '.join(errores)}.")
+                st.error(f"⚠️ **Faltan datos:** No se pudo deducir {', '.join(errores)}.")
 
-            # Sliders (Respetando el valor calculado o 0 si no existe)
             e_val = st.slider("Relación de vacíos (e)", 0.0, 5.0, e_def, key=f"sl_e_{sk}")
             w_val = st.slider("Humedad (w %)", 0.0, 100.0, w_def, key=f"sl_w_{sk}") / 100
             s_val = st.slider("Saturación (S %)", 0.0, 100.0, s_def, key=f"sl_s_{sk}") / 100
             ws_val = st.slider("Peso Sólidos (Ws)", 0.0, 5000.0, ws_def, key=f"sl_ws_{sk}")
             
-            # Recálculo Final
+            # Recálculo Final basado en Sliders
             f = {k: 0.0 for k in diccionario_maestro.keys()}
-            f['e'], f['ws'], f['gs'] = e_val, ws_val, (bc['gs'] if bc['gs'] > 0 else 2.65)
+            f['gs'] = bc['gs'] if bc['gs'] > 0 else 2.65
+            f['e'], f['ws'] = e_val, ws_val
             
             if modo == "Académico (Base Vs=1)":
                 f['vs'] = 1.0
@@ -132,20 +130,16 @@ with tabs[0]:
             f['vv'] = f['e'] * f['vs']
             
             if s_val > 0:
-                f['s'] = s_val
-                f['vw'] = f['s'] * f['vv']
+                f['s'], f['vw'] = s_val, s_val * f['vv']
                 f['ww'] = f['vw']
                 f['w'] = f['ww'] / f['ws'] if f['ws'] > 0 else 0
             else:
-                f['w'] = w_val
-                f['ww'] = f['ws'] * f['w']
+                f['w'], f['ww'] = w_val, f['ws'] * w_val
                 f['vw'] = f['ww']
                 f['s'] = f['vw'] / f['vv'] if f['vv'] > 0 else 0
 
-            f['vt'] = f['vs'] + f['vv']
-            f['va'] = max(0.0, f['vv'] - f['vw'])
-            f['wm'] = f['ws'] + f['ww']
-            f['n'] = f['vv'] / f['vt'] if f['vt'] > 0 else 0
+            f['vt'], f['va'] = f['vs'] + f['vv'], max(0.0, f['vv'] - f['vw'])
+            f['wm'], f['n'] = f['ws'] + f['ww'], (f['vv'] / (f['vs'] + f['vv']) if (f['vs'] + f['vv']) > 0 else 0)
 
             if st.button("🔄 Reiniciar"):
                 del st.session_state.base_calc
@@ -155,28 +149,14 @@ with tabs[0]:
             st.subheader("📊 Resultados")
             gamma_h = (f['wm']/f['vt'])*9.81 if f['vt'] > 0 else 0
             gamma_d = (f['ws']/f['vt'])*9.81 if f['vt'] > 0 else 0
-            
-            res_df = pd.DataFrame({
-                "Propiedad": list(diccionario_maestro.values()), 
-                "Valor": [
-                    f"{f['gs']:.3f}", f"{f['e']:.4f}", f"{f['n']*100:.2f}%", 
-                    f"{f['w']*100:.2f}%", f"{f['s']*100:.2f}%", f"{f['wm']:.2f} g", 
-                    f"{f['ws']:.2f} g", f"{f['ww']:.2f} g", f"{f['vt']:.2f} cm³", 
-                    f"{f['vs']:.2f} cm³", f"{f['vv']:.2f} cm³", f"{f['vw']:.2f} cm³", 
-                    f"{f['va']:.2f} cm³", f"{gamma_h:.2f} kN/m³", f"{gamma_d:.2f} kN/m³"
-                ]
-            })
+            res_df = pd.DataFrame({"Propiedad": list(diccionario_maestro.values()), 
+                "Valor": [f"{f['gs']:.3f}", f"{f['e']:.4f}", f"{f['n']*100:.2f}%", f"{f['w']*100:.2f}%", f"{f['s']*100:.2f}%", f"{f['wm']:.2f} g", f"{f['ws']:.2f} g", f"{f['ww']:.2f} g", f"{f['vt']:.2f} cm³", f"{f['vs']:.2f} cm³", f"{f['vv']:.2f} cm³", f"{f['vw']:.2f} cm³", f"{f['va']:.2f} cm³", f"{gamma_h:.2f} kN/m³", f"{gamma_d:.2f} kN/m³"]})
             st.table(res_df)
             st.session_state.df_excel = res_df
-            
-            fig = go.Figure(data=[
-                go.Bar(name='Sólidos', x=['Fases'], y=[f['vs']], marker_color='#7E5109'),
-                go.Bar(name='Agua', x=['Fases'], y=[f['vw']], marker_color='#3498DB'),
-                go.Bar(name='Aire', x=['Fases'], y=[f['va']], marker_color='#BDC3C7')
-            ])
+            fig = go.Figure(data=[go.Bar(name='Sólidos', x=['Fases'], y=[f['vs']], marker_color='#7E5109'), go.Bar(name='Agua', x=['Fases'], y=[f['vw']], marker_color='#3498DB'), go.Bar(name='Aire', x=['Fases'], y=[f['va']], marker_color='#BDC3C7')])
             fig.update_layout(barmode='stack', height=350); st.plotly_chart(fig, use_container_width=True)
 
-# --- PESTAÑA 2: ESFUERZOS ---
+# --- PESTAÑAS RESTANTES ---
 with tabs[1]:
     st.header("🗂️ Esfuerzos Geostáticos")
     cp1, cp2 = st.columns([1, 2])
@@ -188,7 +168,6 @@ with tabs[1]:
             h = st.number_input(f"H{i+1}", 0.1, 20.0, 3.0, key=f"pres_h_{i}")
             g = st.number_input(f"γ{i+1}", 1.0, 22.0, 18.0, key=f"pres_g_{i}")
             estratos.append({'h': h, 'g': g})
-
     z_pts = sorted(list(set([0.0, nf] + [sum(e['h'] for e in estratos[:i+1]) for i in range(len(estratos))])))
     z_pts = [p for p in z_pts if p <= sum(e['h'] for e in estratos)]
     st_l, u_l, se_l, s_acu = [], [], [], 0
@@ -202,33 +181,26 @@ with tabs[1]:
                 z_t += e['h']
         u_p = (z - nf) * 9.81 if z > nf else 0
         st_l.append(s_acu); u_l.append(u_p); se_l.append(s_acu - u_p)
-
     with cp2:
         df_p = pd.DataFrame({"Z (m)": z_pts, "σ Total": st_l, "u": u_l, "σ' Ef.": se_l})
-        st.dataframe(df_p)
-        fig_p = go.Figure()
+        st.dataframe(df_p); fig_p = go.Figure()
         fig_p.add_trace(go.Scatter(x=st_l, y=z_pts, name='Total', line=dict(color='brown')))
         fig_p.add_trace(go.Scatter(x=u_l, y=z_pts, name='u', line=dict(color='blue', dash='dash')))
         fig_p.add_trace(go.Scatter(x=se_l, y=z_pts, name='Efectivo', fill='tonextx', line=dict(color='green')))
         fig_p.update_yaxes(autorange="reversed"); st.plotly_chart(fig_p)
 
-# --- PESTAÑA 3: PLASTICIDAD ---
 with tabs[2]:
     st.header("📈 Plasticidad")
     cl1, cl2 = st.columns([1, 2])
     with cl1:
         ll = st.number_input("LL", 0, 120, 40); lp = st.number_input("LP", 0, 100, 20)
-        ip = ll - lp
-        st.metric("IP", ip)
-        st.info("Clasificación SUCS automática en desarrollo...")
+        ip = ll - lp; st.metric("IP", ip)
     with cl2:
-        xv = np.linspace(0, 100, 100)
-        fig_c = go.Figure()
+        xv = np.linspace(0, 100, 100); fig_c = go.Figure()
         fig_c.add_trace(go.Scatter(x=xv, y=0.73*(xv-20), name='Línea A', line=dict(color='black')))
         fig_c.add_trace(go.Scatter(x=[ll], y=[ip], mode='markers', marker=dict(size=12, color='red')))
         fig_c.update_xaxes(title="LL"); fig_c.update_yaxes(title="IP"); st.plotly_chart(fig_c)
 
-# --- PESTAÑA 4: REPORTE ---
 with tabs[3]:
     st.header("📥 Descargar Reporte")
     if st.button("📊 Generar Excel"):
