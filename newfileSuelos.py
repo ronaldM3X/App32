@@ -67,14 +67,11 @@ with tabs[0]:
             )
 
     if st.button("🚀 Calcular Base Geotécnica"):
-        # Inicialización de variables
         d = {k: 0.0 for k in diccionario_maestro.keys()}
         
-        # En modo académico, Vs es siempre 1 por defecto
         if modo == "Académico (Base Vs=1)":
             d['vs'] = 1.0
         
-        # Asignar valores ingresados (Normalizando % a decimal)
         for k, v in inputs.items():
             if k in ['w', 'n', 's'] and v > 1.5:
                 d[k] = v / 100
@@ -82,42 +79,34 @@ with tabs[0]:
                 d[k] = v
 
         # --- MOTOR DE RETROALIMENTACIÓN RECURSIVO ---
-        # Se ejecuta 50 veces para que los datos calculados sirvan para encontrar nuevos resultados
         for _ in range(50):
-            # Relaciones de Sólidos y Gs
             if d['gs'] > 0 and d['ws'] > 0 and d['vs'] == 0: d['vs'] = d['ws'] / d['gs']
             if d['gs'] > 0 and d['vs'] > 0 and d['ws'] == 0: d['ws'] = d['gs'] * d['vs']
             if d['ws'] > 0 and d['vs'] > 0 and d['gs'] == 0: d['gs'] = d['ws'] / d['vs']
             
-            # Relaciones de Humedad y Peso de Agua
             if d['ws'] > 0 and d['w'] > 0 and d['ww'] == 0: d['ww'] = d['ws'] * d['w']
             if d['ws'] > 0 and d['ww'] > 0 and d['w'] == 0: d['w'] = d['ww'] / d['ws']
             if d['ww'] > 0: d['vw'] = d['ww']
             if d['vw'] > 0: d['ww'] = d['vw']
             
-            # CONEXIÓN CRÍTICA DE VOLÚMENES (Vt, Vs, Vv)
             if d['vt'] > 0 and d['vs'] > 0 and d['vv'] == 0: d['vv'] = d['vt'] - d['vs']
             if d['vt'] > 0 and d['vv'] > 0 and d['vs'] == 0: d['vs'] = d['vt'] - d['vv']
             if d['vs'] > 0 and d['vv'] > 0 and d['vt'] == 0: d['vt'] = d['vs'] + d['vv']
             
-            # Relaciones de Vacíos y Porosidad
             if d['vv'] > 0 and d['vs'] > 0 and d['e'] == 0: d['e'] = d['vv'] / d['vs']
             if d['e'] > 0 and d['vs'] > 0 and d['vv'] == 0: d['vv'] = d['e'] * d['vs']
             if d['vt'] > 0 and d['vv'] > 0 and d['n'] == 0: d['n'] = d['vv'] / d['vt']
             if d['e'] > 0 and d['n'] == 0: d['n'] = d['e'] / (1 + d['e'])
             if d['n'] > 0 and d['e'] == 0: d['e'] = d['n'] / (1 - d['n'])
             
-            # Grado de Saturación
             if d['vw'] > 0 and d['vv'] > 0 and d['s'] == 0: d['s'] = d['vw'] / d['vv']
             if d['s'] > 0 and d['vv'] > 0 and d['vw'] == 0: d['vw'] = d['s'] * d['vv']
             
-            # Pesos Totales y Aire
             if d['wm'] > 0 and d['ws'] > 0 and d['ww'] == 0: d['ww'] = d['wm'] - d['ws']
             if d['wm'] > 0 and d['ww'] > 0 and d['ws'] == 0: d['ws'] = d['wm'] - d['ww']
             if d['ws'] > 0 and d['ww'] > 0 and d['wm'] == 0: d['wm'] = d['ws'] + d['ww']
             if d['vv'] > 0 and d['vw'] > 0 and d['va'] == 0: d['va'] = max(0.0, d['vv'] - d['vw'])
             
-            # Pesos Unitarios
             if d['wm'] > 0 and d['vt'] > 0 and d['gh'] == 0: d['gh'] = d['wm'] / d['vt']
             if d['ws'] > 0 and d['vt'] > 0 and d['gd'] == 0: d['gd'] = d['ws'] / d['vt']
 
@@ -133,7 +122,6 @@ with tabs[0]:
 
         with col_sim:
             st.subheader("🕹️ 2. Simulador de Estados")
-            # Los sliders heredan los valores calculados por el motor
             e_val = st.slider("Relación de vacíos (e)", 0.1, 5.0, float(bc['e']) if bc['e'] > 0 else 0.70, key=f"s_e_{sk}")
             w_val = st.slider("Contenido de humedad (w %)", 0.0, 100.0, float(bc['w']*100), key=f"s_w_{sk}") / 100
             s_val = st.slider("Grado de saturación (S %)", 0.0, 100.0, float(bc['s']*100), key=f"s_s_{sk}") / 100
@@ -146,7 +134,6 @@ with tabs[0]:
                 
             ws_val = st.slider("Peso de los sólidos (Ws)", 10.0, 5000.0, float(ws_inicial), key=f"s_ws_{sk}")
 
-            # Recálculo instantáneo basado en sliders
             f = {k: 0.0 for k in diccionario_maestro.keys()}
             f['gs'] = bc['gs'] if bc['gs'] > 0 else 2.65
             f['e'], f['ws'] = e_val, ws_val
@@ -160,7 +147,6 @@ with tabs[0]:
             f['vv'] = f['e'] * f['vs']
             f['vt'] = f['vs'] + f['vv']
             
-            # Prioridad de saturación en el simulador
             if s_val > 0:
                 f['s'] = s_val
                 f['vw'] = f['s'] * f['vv']
@@ -196,7 +182,6 @@ with tabs[0]:
             st.table(pd.DataFrame(res_data))
             st.session_state.df_excel = pd.DataFrame(res_data)
 
-            # --- DIAGRAMA DE FASES ---
             fig = go.Figure(data=[
                 go.Bar(name='Sólidos', x=['Fases'], y=[f['vs']], marker_color='#7E5109', width=0.5),
                 go.Bar(name='Agua', x=['Fases'], y=[f['vw']], marker_color='#3498DB', width=0.5),
@@ -221,38 +206,27 @@ with tabs[1]:
             gamma = st.number_input(f"Peso Unitario γ (kN/m³) - {i+1}", 1.0, 30.0, 18.0, key=f"g_{i}")
             estratos_data.append({'h': h, 'g': gamma})
 
-    # Cálculo de puntos
-    z_actual = 0
-    puntos_z = [0]
-    esf_total = [0]
-    presion_poros = [0]
-    
-    # Agregar punto del NF si no coincide con fronteras
+    z_acum_frontera = 0
     fronteras = []
-    temp_z = 0
     for e in estratos_data:
-        temp_z += e['h']
-        fronteras.append(temp_z)
+        z_acum_frontera += e['h']
+        fronteras.append(z_acum_frontera)
     
     todos_puntos = sorted(list(set([0, nf] + fronteras)))
     todos_puntos = [p for p in todos_puntos if p <= sum(e['h'] for e in estratos_data)]
 
-    sigma_t = 0
     st_list, u_list, se_list = [], [], []
 
     for z in todos_puntos:
-        # Calcular Sigma Total
         current_sigma = 0
-        z_acum = 0
+        z_ref = 0
         for e in estratos_data:
-            if z > z_acum:
-                espesor_efectivo = min(e['h'], z - z_acum)
-                current_sigma += espesor_efectivo * e['g']
-                z_acum += e['h']
+            if z > z_ref:
+                espesor = min(e['h'], z - z_ref)
+                current_sigma += espesor * e['g']
+                z_ref += e['h']
         
-        # Calcular Presión de poros
         current_u = (z - nf) * 9.81 if z > nf else 0
-        
         st_list.append(current_sigma)
         u_list.append(current_u)
         se_list.append(current_sigma - current_u)
@@ -269,7 +243,7 @@ with tabs[1]:
         fig_p = go.Figure()
         fig_p.add_trace(go.Scatter(x=st_list, y=todos_puntos, name='σ Total', line=dict(color='brown', width=3)))
         fig_p.add_trace(go.Scatter(x=u_list, y=todos_puntos, name='u (Agua)', line=dict(color='blue', dash='dash')))
-        fig_p.add_trace(go.Scatter(x=se_l := se_list, y=todos_puntos, name="σ' Efectivo", fill='tonextx', line=dict(color='green', width=3)))
+        fig_p.add_trace(go.Scatter(x=se_list, y=todos_puntos, name="σ' Efectivo", fill='tonextx', line=dict(color='green', width=3)))
         
         fig_p.update_yaxes(autorange="reversed", title="Profundidad (m)")
         fig_p.update_xaxes(title="Presión (kPa)", side="top")
@@ -289,7 +263,6 @@ with tabs[2]:
         ip = ll - lp
         st.metric("Índice de Plasticidad (IP)", f"{ip}%")
         
-        # Lógica SUCS simplificada
         if p200 >= 50:
             if ll < 50:
                 sucs = "CL o ML" if ip > 7 and ip >= 0.73*(ll-20) else "ML o OL"
@@ -300,7 +273,6 @@ with tabs[2]:
             st.info("Suelo Grueso (Requiere Granulometría Completa)")
 
     with col_c2:
-        # Carta de plasticidad
         ll_plot = np.linspace(0, 100, 100)
         linea_a = 0.73 * (ll_plot - 20)
         linea_a = np.maximum(0, linea_a)
@@ -334,4 +306,3 @@ with tabs[3]:
         )
     else:
         st.warning("Primero realiza cálculos en la pestaña de Gravimetría.")
-            
