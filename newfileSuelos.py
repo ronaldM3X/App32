@@ -4,13 +4,10 @@ import plotly.graph_objects as go
 import numpy as np
 import io
 
-# 1. CONFIGURACIÓN DE PÁGINA
-st.set_page_config(page_title="Geotecnia Suite Master v18.0", layout="wide", page_icon="🏗️")
+# 1. CONFIGURACIÓN
+st.set_page_config(page_title="Geotecnia Suite Master v19.0", layout="wide", page_icon="🏗️")
 
-# Estilo de acompañamiento
 st.sidebar.title("👨‍🏫 Panel de Control")
-st.sidebar.info("Modos actualizados: 'Metas' para datos reales y 'Académico' para teoría (Vs=1). ¡Cero valores por defecto!")
-
 modo = st.sidebar.radio("Selecciona el Modo:", ("Metas (Laboratorio)", "Académico (Base Vs=1)"))
 
 st.title(f"🏗️ Geotecnia Master - Modo {modo.split()[0]}")
@@ -29,23 +26,21 @@ with tabs[0]:
     }
 
     st.subheader("📥 Entrada de Datos")
-    seleccionados = st.multiselect("Variables que conoces:", options=list(diccionario_maestro.keys()), format_func=lambda x: diccionario_maestro[x])
+    seleccionados = st.multiselect("Variables conocidas:", options=list(diccionario_maestro.keys()), format_func=lambda x: diccionario_maestro[x])
     
     inputs = {}
     cols_in = st.columns(3)
     for i, clave in enumerate(seleccionados):
-        inputs[clave] = cols_in[i%3].number_input(f"{diccionario_maestro[clave]}", value=0.0, format="%.4f", key=f"in_{clave}")
+        inputs[clave] = cols_in[i%3].number_input(f"{diccionario_maestro[clave]}", value=0.0, format="%.4f", key=f"main_in_{clave}")
 
-    if st.button("🚀 Ejecutar Cálculo"):
+    if st.button("🚀 Calcular"):
         d = {k: 0.0 for k in diccionario_maestro.keys()}
-        if modo == "Académico (Base Vs=1)":
-            d['vs'] = 1.0
+        if modo == "Académico (Base Vs=1)": d['vs'] = 1.0
         
         for k, v in inputs.items():
             d[k] = v / 100 if k in ['w', 'n', 's'] and v > 1.0 else v
         
-        # Motor de cálculo iterativo
-        for _ in range(60):
+        for _ in range(100):
             if d['gs'] > 0 and d['vs'] > 0: d['ws'] = d['gs'] * d['vs']
             if d['ws'] > 0 and d['gs'] > 0: d['vs'] = d['ws'] / d['gs']
             if d['ws'] > 0 and d['vs'] > 0: d['gs'] = d['ws'] / d['vs']
@@ -64,9 +59,11 @@ with tabs[0]:
             if d['vv'] > 0 and d['s'] > 0: d['vw'] = d['vv'] * d['s']
             if d['vv'] > 0 and d['vw'] > 0: d['va'] = max(0.0, d['vv'] - d['vw'])
 
+        # Esto asegura que el slider se actualice al cambiar el estado
         st.session_state.base_data = d.copy()
         st.session_state.live_data = d.copy()
-        st.success("¡Cálculo Geotécnico finalizado!")
+        st.session_state.slider_key = np.random.randint(1, 1000) # Key aleatoria para forzar refresco
+        st.rerun()
 
     if 'live_data' in st.session_state:
         ld = st.session_state.live_data
@@ -75,47 +72,48 @@ with tabs[0]:
         
         with c_sim:
             st.subheader("🕹️ Simulador Dinámico")
-            # AJUSTE CRÍTICO: El slider ahora toma el valor exacto del cálculo
-            # Usamos un valor mínimo de 0.001 para que el slider no explote si e es 0
-            val_e = float(ld['e']) if ld['e'] > 0 else 0.001
-            ld['e'] = st.slider("Ajustar e", 0.001, 5.0, val_e)
             
-            val_w = float(ld['w']) if ld['w'] > 0 else 0.0
-            ld['w'] = st.slider("Ajustar w (%)", 0.0, 100.0, val_w * 100) / 100
+            # SLIDERS CON KEY DINÁMICA (Para que no se traben en 0.6)
+            k = st.session_state.get('slider_key', 0)
             
-            val_wm = float(ld['wm']) if ld['wm'] > 0 else 0.0
-            ld['wm'] = st.slider("Ajustar Wt (g)", 0.0, max(5000.0, val_wm*2), val_wm)
+            ld['e'] = st.slider("Ajustar e", 0.001, 5.0, float(ld['e']) if ld['e'] > 0 else 0.5, key=f"e_s_{k}")
+            ld['w'] = st.slider("Ajustar w (%)", 0.0, 100.0, float(ld['w']*100), key=f"w_s_{k}") / 100
             
-            # Recálculos en vivo
+            # SIMULADOR DE PESO DE SÓLIDOS (Ws) - NUEVO
+            val_ws = float(ld['ws']) if ld['ws'] > 0 else 2.65 # Default por si no hay nada
+            ld['ws'] = st.slider("Ajustar Peso Sólidos (Ws g)", 0.1, max(10.0, val_ws*3), val_ws, key=f"ws_s_{k}")
+            
+            # RE-CÁLCULOS (El Ws ahora manda sobre la Gs si el volumen Vs es fijo)
+            if ld['vs'] > 0: ld['gs'] = ld['ws'] / ld['vs']
             ld['vv'] = ld['vs'] * ld['e']
             ld['vt'] = ld['vs'] + ld['vv']
-            ld['ww'] = max(0.0, ld['wm'] - ld['ws'])
+            ld['ww'] = ld['ws'] * ld['w']
             ld['vw'] = ld['ww'] / 1.0
-            if ld['ws'] > 0: ld['w'] = ld['ww'] / ld['ws']
+            ld['wm'] = ld['ws'] + ld['ww']
             if ld['vv'] > 0: ld['s'] = ld['vw'] / ld['vv']
             ld['va'] = max(0.0, ld['vv'] - ld['vw'])
             
             st.session_state.live_data = ld
-            if st.button("🔄 Resetear a Original"):
+            if st.button("🔄 Resetear"):
                 st.session_state.live_data = st.session_state.base_data.copy()
+                st.session_state.slider_key = np.random.randint(1001, 2000)
                 st.rerun()
 
         with c_res:
             gh = (ld['wm']/ld['vt'])*9.81 if ld['vt'] > 0 else 0
             gd = (ld['ws']/ld['vt'])*9.81 if ld['vt'] > 0 else 0
             res_df = pd.DataFrame({"Propiedad": list(diccionario_maestro.values()), 
-                                  "Valor": [f"{ld['gs']:.2f}", f"{ld['e']:.4f}", f"{ld['n']*100:.2f}%", f"{ld['w']*100:.2f}%", f"{ld['s']*100:.2f}%", 
+                                  "Valor": [f"{ld['gs']:.3f}", f"{ld['e']:.4f}", f"{ld['n']*100:.2f}%", f"{ld['w']*100:.2f}%", f"{ld['s']*100:.2f}%", 
                                            f"{ld['wm']:.2f}g", f"{ld['ws']:.2f}g", f"{ld['ww']:.2f}g", f"{ld['vt']:.2f}cm³", f"{ld['vs']:.2f}cm³", 
                                            f"{ld['vv']:.2f}cm³", f"{ld['vw']:.2f}cm³", f"{ld['va']:.2f}cm³", f"{gh:.2f} kN/m³", f"{gd:.2f} kN/m³"]})
             st.table(res_df)
-            st.session_state.df_grav_excel = res_df
             
             fig = go.Figure(data=[go.Bar(name='Sólidos', x=['Fases'], y=[ld['vs']], marker_color='#7E5109'),
                                   go.Bar(name='Agua', x=['Fases'], y=[ld['vw']], marker_color='#3498DB'),
                                   go.Bar(name='Aire', x=['Fases'], y=[ld['va']], marker_color='#BDC3C7')])
             fig.update_layout(barmode='stack', height=350, margin=dict(t=0,b=0)); st.plotly_chart(fig, use_container_width=True)
 
-# --- PESTAÑAS RESTANTES (IGUALES Y COMPLETAS) ---
+# [El resto de pestañas (Presiones, SUCS, Excel) permanecen igual que en la v18.0]
 with tabs[1]: # Presiones
     st.header("Esfuerzos Geostáticos")
     col_p1, col_p2 = st.columns([1, 2])
