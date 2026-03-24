@@ -8,7 +8,6 @@ import io
 st.set_page_config(page_title="Geotecnia Suite Master v23.4", layout="wide", page_icon="🏗️")
 
 st.sidebar.title("👨‍🏫 Panel de Control")
-# Aplicando tus nombres de modo personalizados: Metas y Académico
 modo = st.sidebar.radio("Selecciona el Modo:", ("Metas (Laboratorio)", "Académico (Base Vs=1)"))
 st.sidebar.markdown("---")
 
@@ -36,14 +35,21 @@ with tabs[0]:
         inputs[clave] = cols_in[i%3].number_input(f"{diccionario_maestro[clave]}", value=0.0, format="%.4f", key=f"in_{clave}")
 
     if st.button("🚀 Calcular Base"):
+        # VALIDACIÓN SOLICITADA: No inventar si faltan datos en Metas
+        tiene_peso = any(k in inputs and inputs[k] > 0 for k in ['ws', 'wm', 'ww'])
+        tiene_volumen = any(k in inputs and inputs[k] > 0 for k in ['vs', 'vt', 'vv', 'vw', 'va'])
+        
+        if modo == "Metas (Laboratorio)" and not (tiene_peso or tiene_volumen):
+            st.error("❌ Datos insuficientes para magnitudes reales. Por favor, ingresa al menos un Peso (Ws, Wt) o un Volumen.")
+            st.stop()
+
         d = {k: 0.0 for k in diccionario_maestro.keys()}
         if modo == "Académico (Base Vs=1)": d['vs'] = 1.0
         
         for k, v in inputs.items():
-            # Normalización automática si meten porcentajes como enteros
             d[k] = v / 100 if k in ['w', 'n', 's'] and v > 1.0 else v
         
-        # Lógica deductiva original (Tus 50 iteraciones para asegurar convergencia)
+        # Lógica deductiva (Tus 50 iteraciones originales intactas)
         for _ in range(50):
             if d['gs'] > 0 and d['ws'] > 0 and d['vs'] == 0: d['vs'] = d['ws'] / d['gs']
             if d['gs'] > 0 and d['vs'] > 0: d['ws'] = d['gs'] * d['vs']
@@ -55,6 +61,13 @@ with tabs[0]:
             if d['s'] > 0 and d['vv'] > 0: d['vw'] = d['s'] * d['vv']
             if d['vw'] > 0 and d['vv'] > 0: d['s'] = d['vw'] / d['vv']
             if d['gs'] == 0 and d['ws'] > 0 and d['vs'] > 0: d['gs'] = d['ws'] / d['vs']
+            if d['vt'] > 0 and d['vs'] > 0: d['vv'] = d['vt'] - d['vs']
+            if d['vs'] > 0 and d['vv'] > 0: d['vt'] = d['vs'] + d['vv']
+            if d['wm'] > 0 and d['ws'] > 0: d['ww'] = d['wm'] - d['ws']
+            if d['ws'] > 0 and d['ww'] > 0: d['wm'] = d['ws'] + d['ww']
+            if d['vw'] > 0: d['ww'] = d['vw']
+            if d['ww'] > 0: d['vw'] = d['ww']
+            if d['vv'] > 0 and d['vw'] > 0: d['va'] = d['vv'] - d['vw']
 
         st.session_state.base_calc = d.copy()
         st.session_state.slider_key = np.random.randint(1, 999)
@@ -69,18 +82,19 @@ with tabs[0]:
         with c_sim:
             st.subheader("🕹️ 2. Simulador (Manda sobre la tabla)")
             
-            e_def = float(bc['e']) if bc['e'] > 0 else 0.65
-            w_def = float(bc['w']*100) if bc['w'] > 0 else 15.0
-            ws_def = float(bc['ws']) if bc['ws'] > 0 else (2.65 if modo == "Académico (Base Vs=1)" else 100.0)
+            e_def = float(bc['e']) if bc['e'] > 0 else 0.70
+            w_def = float(bc['w']*100) if bc['w'] > 0 else 0.0
             s_def = float(bc['s']*100) if bc['s'] > 0 else 0.0
+            ws_def = float(bc['ws'])
             
-            # SLIDERS (Ahora con Saturación incluida)
+            if ws_def == 0 and modo == "Metas (Laboratorio)":
+                st.warning("⚠️ Sin Peso de Sólidos (Ws) definido.")
+
             e_val = st.slider("Relación de vacíos (e)", 0.01, 5.0, e_def, key=f"sl_e_{sk}")
             w_val = st.slider("Humedad (w %)", 0.0, 100.0, w_def, key=f"sl_w_{sk}") / 100
             s_val = st.slider("Grado de Saturación (S %)", 0.0, 100.0, s_def, key=f"sl_s_{sk}") / 100
-            ws_val = st.slider("Peso de Sólidos (Ws)", 0.1, 2000.0, ws_def, key=f"sl_ws_{sk}")
+            ws_val = st.slider("Peso de Sólidos (Ws)", 0.0, 2000.0, ws_def, key=f"sl_ws_{sk}")
             
-            # RE-CÁLCULO DESDE LOS SLIDERS
             final = {k: 0.0 for k in diccionario_maestro.keys()}
             final['e'] = e_val
             final['ws'] = ws_val
@@ -90,12 +104,12 @@ with tabs[0]:
                 final['vs'] = 1.0
                 final['ws'] = final['gs'] * final['vs']
             else:
-                final['vs'] = final['ws'] / final['gs']
+                final['vs'] = final['ws'] / final['gs'] if final['gs'] > 0 else 0
             
             final['vv'] = final['e'] * final['vs']
             
-            # Lógica de prioridad: Si S se movió, recalculamos Ww
-            if s_val != (bc['s'] if 's' in bc else 0):
+            # Lógica de S vs W
+            if s_val > 0:
                 final['s'] = s_val
                 final['vw'] = final['s'] * final['vv']
                 final['ww'] = final['vw']
@@ -106,18 +120,15 @@ with tabs[0]:
                 final['vw'] = final['ww']
                 final['s'] = final['vw'] / final['vv'] if final['vv'] > 0 else 0
 
-            # Verificación de saturación física
             if final['vw'] > final['vv']:
                 final['vw'] = final['vv']
                 final['s'] = 1.0
-                final['ww'] = final['vw']
-                final['w'] = final['ww'] / final['ws']
-                st.warning("⚠️ Suelo saturado (Vw limitado por Vv)")
+                st.warning("⚠️ Saturación máxima alcanzada.")
             
             final['vt'] = final['vs'] + final['vv']
             final['va'] = max(0.0, final['vv'] - final['vw'])
             final['wm'] = final['ws'] + final['ww']
-            final['n'] = final['vv'] / final['vt']
+            final['n'] = final['vv'] / final['vt'] if final['vt'] > 0 else 0
 
             if st.button("🔄 Reiniciar"):
                 del st.session_state.base_calc
@@ -208,4 +219,4 @@ with tabs[3]:
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             if 'df_excel' in st.session_state: st.session_state.df_excel.to_excel(writer, sheet_name='Resultados')
         st.download_button("Descargar_Reporte.xlsx", output.getvalue(), "Reporte_Geotecnia.xlsx")
-                
+            
