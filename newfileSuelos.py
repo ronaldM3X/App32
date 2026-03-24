@@ -8,7 +8,6 @@ import io
 st.set_page_config(page_title="Geotecnia Suite Master v23.4", layout="wide", page_icon="🏗️")
 
 st.sidebar.title("👨‍🏫 Panel de Control")
-# Modos personalizados: Metas y Académico
 modo = st.sidebar.radio("Selecciona el Modo:", ("Metas (Laboratorio)", "Académico (Base Vs=1)"))
 st.sidebar.markdown("---")
 
@@ -36,7 +35,7 @@ with tabs[0]:
         inputs[clave] = cols_in[i%3].number_input(f"{diccionario_maestro[clave]}", value=0.0, format="%.4f", key=f"in_{clave}")
 
     if st.button("🚀 Calcular Base"):
-        # VALIDACIÓN: No inventar si faltan datos en Metas
+        # Validación estricta para Metas
         tiene_peso = any(k in inputs and inputs[k] > 0 for k in ['ws', 'wm', 'ww'])
         tiene_volumen = any(k in inputs and inputs[k] > 0 for k in ['vs', 'vt', 'vv', 'vw', 'va'])
         
@@ -44,45 +43,50 @@ with tabs[0]:
             st.error("❌ Datos insuficientes para magnitudes reales. Por favor, ingresa al menos un Peso (Ws, Wt) o un Volumen.")
             st.stop()
 
+        # Inicialización de diccionario
         d = {k: 0.0 for k in diccionario_maestro.keys()}
-        if modo == "Académico (Base Vs=1)": d['vs'] = 1.0
+        if modo == "Académico (Base Vs=1)": 
+            d['vs'] = 1.0
         
+        # Carga de inputs con normalización de porcentajes
         for k, v in inputs.items():
             d[k] = v / 100 if k in ['w', 'n', 's'] and v > 1.0 else v
         
-        # LÓGICA DEDUCTIVA POTENCIADA (Tus 50 iteraciones con conexiones totales)
+        # MOTOR DE INFERENCIA UNIFICADO (50 iteraciones para ambos modos)
         for _ in range(50):
-            # Relaciones básicas Gs, Ws, Vs
+            # Fase A: Relaciones Gs, Ws, Vs (Fundamentales)
             if d['gs'] > 0 and d['ws'] > 0 and d['vs'] == 0: d['vs'] = d['ws'] / d['gs']
             if d['gs'] > 0 and d['vs'] > 0 and d['ws'] == 0: d['ws'] = d['gs'] * d['vs']
-            if d['gs'] == 0 and d['ws'] > 0 and d['vs'] > 0: d['gs'] = d['ws'] / d['vs']
+            if d['ws'] > 0 and d['vs'] > 0 and d['gs'] == 0: d['gs'] = d['ws'] / d['vs']
             
-            # Humedad y Pesos de Agua
+            # Fase B: Humedad y Agua
             if d['ws'] > 0 and d['w'] > 0 and d['ww'] == 0: d['ww'] = d['ws'] * d['w']
+            if d['ws'] > 0 and d['ww'] > 0 and d['w'] == 0: d['w'] = d['ww'] / d['ws']
             if d['ww'] > 0: d['vw'] = d['ww']
+            if d['vw'] > 0: d['ww'] = d['vw']
             
-            # Relaciones de vacíos (e, n, S)
-            if d['e'] > 0 and d['vs'] > 0 and d['vv'] == 0: d['vv'] = d['e'] * d['vs']
-            if d['vv'] > 0 and d['vs'] > 0 and d['e'] == 0: d['e'] = d['vv'] / d['vs']
-            if d['vv'] > 0 and d['vs'] > 0 and d['n'] == 0: d['n'] = d['vv'] / (d['vs'] + d['vv'])
-            if d['s'] > 0 and d['vv'] > 0 and d['vw'] == 0: d['vw'] = d['s'] * d['vv']
-            if d['vw'] > 0 and d['vv'] > 0 and d['s'] == 0: d['s'] = d['vw'] / d['vv']
-            
-            # CONEXIONES DE VOLÚMENES (Solución Vt - Vs)
+            # Fase C: Volúmenes y Espacios (La Resta Maestra)
             if d['vt'] > 0 and d['vs'] > 0 and d['vv'] == 0: d['vv'] = d['vt'] - d['vs']
             if d['vt'] > 0 and d['vv'] > 0 and d['vs'] == 0: d['vs'] = d['vt'] - d['vv']
             if d['vs'] > 0 and d['vv'] > 0 and d['vt'] == 0: d['vt'] = d['vs'] + d['vv']
             
-            # CONEXIONES DE PESOS (Wt - Ws)
+            # Fase D: Relaciones de Vacíos, Porosidad y Saturación
+            if d['vv'] > 0 and d['vs'] > 0 and d['e'] == 0: d['e'] = d['vv'] / d['vs']
+            if d['e'] > 0 and d['vs'] > 0 and d['vv'] == 0: d['vv'] = d['e'] * d['vs']
+            if d['vt'] > 0 and d['vv'] > 0 and d['n'] == 0: d['n'] = d['vv'] / d['vt']
+            if d['e'] > 0 and d['n'] == 0: d['n'] = d['e'] / (1 + d['e'])
+            if d['n'] > 0 and d['e'] == 0: d['e'] = d['n'] / (1 - d['n'])
+            
+            if d['s'] > 0 and d['vv'] > 0 and d['vw'] == 0: d['vw'] = d['s'] * d['vv']
+            if d['vw'] > 0 and d['vv'] > 0 and d['s'] == 0: d['s'] = d['vw'] / d['vv']
+            
+            # Fase E: Conexiones de Pesos Totales
             if d['wm'] > 0 and d['ws'] > 0 and d['ww'] == 0: d['ww'] = d['wm'] - d['ws']
             if d['wm'] > 0 and d['ww'] > 0 and d['ws'] == 0: d['ws'] = d['wm'] - d['ww']
             if d['ws'] > 0 and d['ww'] > 0 and d['wm'] == 0: d['wm'] = d['ws'] + d['ww']
             
-            # AIRE Y SATURACIÓN
+            # Fase F: Aire y Pesos Unitarios
             if d['vv'] > 0 and d['vw'] > 0 and d['va'] == 0: d['va'] = d['vv'] - d['vw']
-            if d['vw'] == 0 and d['ww'] > 0: d['vw'] = d['ww']
-            
-            # PESOS UNITARIOS
             if d['wm'] > 0 and d['vt'] > 0 and d['gh'] == 0: d['gh'] = d['wm'] / d['vt']
             if d['ws'] > 0 and d['vt'] > 0 and d['gd'] == 0: d['gd'] = d['ws'] / d['vt']
 
@@ -99,7 +103,7 @@ with tabs[0]:
         with c_sim:
             st.subheader("🕹️ 2. Simulador (Manda sobre la tabla)")
             
-            # LÓGICA DE HERENCIA ESTRICTA
+            # Herencia Estricta Unificada
             e_def = float(bc['e'])
             w_def = float(bc['w'] * 100)
             s_def = float(bc['s'] * 100)
@@ -108,34 +112,34 @@ with tabs[0]:
             if ws_def == 0 and bc['wm'] > 0:
                 ws_def = bc['wm'] / (1 + bc['w'])
             
-            # Mensajes de error dinámicos
+            # Errores dinámicos (e es vital para ambos modos)
             errores = []
             if e_def == 0: errores.append("Relación de vacíos (e)")
-            if ws_def == 0: errores.append("Peso de Sólidos (Ws)")
+            if ws_def == 0 and modo == "Metas (Laboratorio)": errores.append("Peso de Sólidos (Ws)")
             
             if errores:
-                st.error(f"⚠️ **Faltan datos para simular:** No se pudo deducir {', '.join(errores)}. Ingresa estos valores arriba o mueve los sliders.")
+                st.error(f"⚠️ **Faltan datos para simular:** No se pudo deducir {', '.join(errores)}. Ingresa más datos o mueve los sliders.")
 
-            # Sliders
-            e_val = st.slider("Relación de vacíos (e)", 0.0, 5.0, e_def, key=f"sl_e_{sk}")
+            e_val = st.slider("Relación de vacíos (e)", 0.01, 5.0, e_def if e_def > 0 else 0.70, key=f"sl_e_{sk}")
             w_val = st.slider("Humedad (w %)", 0.0, 100.0, w_def, key=f"sl_w_{sk}") / 100
             s_val = st.slider("Grado de Saturación (S %)", 0.0, 100.0, s_def, key=f"sl_s_{sk}") / 100
-            ws_val = st.slider("Peso de Sólidos (Ws)", 0.0, 2000.0, ws_def, key=f"sl_ws_{sk}")
+            ws_val = st.slider("Peso de Sólidos (Ws)", 0.0, 5000.0, ws_def if ws_def > 0 else 100.0, key=f"sl_ws_{sk}")
             
-            # Recálculo Final
+            # Recálculo Final Basado en Sliders
             final = {k: 0.0 for k in diccionario_maestro.keys()}
-            final['e'] = e_val
-            final['ws'] = ws_val
             final['gs'] = bc['gs'] if bc['gs'] > 0 else 2.65
+            final['e'] = e_val
             
             if modo == "Académico (Base Vs=1)":
                 final['vs'] = 1.0
                 final['ws'] = final['gs'] * final['vs']
             else:
-                final['vs'] = final['ws'] / final['gs'] if final['gs'] > 0 else 0
+                final['ws'] = ws_val
+                final['vs'] = final['ws'] / final['gs']
             
             final['vv'] = final['e'] * final['vs']
             
+            # Prioridad a Saturación sobre Humedad en el simulador
             if s_val > 0:
                 final['s'] = s_val
                 final['vw'] = final['s'] * final['vv']
@@ -163,7 +167,6 @@ with tabs[0]:
 
         with c_res:
             st.subheader("📊 3. Resultados Finales")
-            # Unidades kN/m3 (Asumiendo g = 9.81)
             gamma_h = (final['wm']/final['vt'])*9.81 if final['vt'] > 0 else 0
             gamma_d = (final['ws']/final['vt'])*9.81 if final['vt'] > 0 else 0
             
@@ -187,7 +190,7 @@ with tabs[0]:
             ])
             fig.update_layout(barmode='stack', height=350); st.plotly_chart(fig, use_container_width=True)
 
-# --- RESTO DE PESTAÑAS ---
+# Pestañas restantes se mantienen igual...
 with tabs[1]:
     st.header("🗂️ Esfuerzos Geostáticos")
     cp1, cp2 = st.columns([1, 2])
@@ -245,4 +248,4 @@ with tabs[3]:
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             if 'df_excel' in st.session_state: st.session_state.df_excel.to_excel(writer, sheet_name='Resultados')
         st.download_button("Descargar_Reporte.xlsx", output.getvalue(), "Reporte_Geotecnia.xlsx")
-        
+            
