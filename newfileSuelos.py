@@ -78,35 +78,29 @@ with tabs[0]:
             else:
                 d[k] = v
 
-        # --- MOTOR DE RETROALIMENTACIÓN RECURSIVO ---
+        # --- MOTOR DE RETROALIMENTACIÓN RECURSIVO (50 CICLOS) ---
         for _ in range(50):
             if d['gs'] > 0 and d['ws'] > 0 and d['vs'] == 0: d['vs'] = d['ws'] / d['gs']
             if d['gs'] > 0 and d['vs'] > 0 and d['ws'] == 0: d['ws'] = d['gs'] * d['vs']
             if d['ws'] > 0 and d['vs'] > 0 and d['gs'] == 0: d['gs'] = d['ws'] / d['vs']
-            
             if d['ws'] > 0 and d['w'] > 0 and d['ww'] == 0: d['ww'] = d['ws'] * d['w']
             if d['ws'] > 0 and d['ww'] > 0 and d['w'] == 0: d['w'] = d['ww'] / d['ws']
             if d['ww'] > 0: d['vw'] = d['ww']
             if d['vw'] > 0: d['ww'] = d['vw']
-            
             if d['vt'] > 0 and d['vs'] > 0 and d['vv'] == 0: d['vv'] = d['vt'] - d['vs']
             if d['vt'] > 0 and d['vv'] > 0 and d['vs'] == 0: d['vs'] = d['vt'] - d['vv']
             if d['vs'] > 0 and d['vv'] > 0 and d['vt'] == 0: d['vt'] = d['vs'] + d['vv']
-            
             if d['vv'] > 0 and d['vs'] > 0 and d['e'] == 0: d['e'] = d['vv'] / d['vs']
             if d['e'] > 0 and d['vs'] > 0 and d['vv'] == 0: d['vv'] = d['e'] * d['vs']
             if d['vt'] > 0 and d['vv'] > 0 and d['n'] == 0: d['n'] = d['vv'] / d['vt']
             if d['e'] > 0 and d['n'] == 0: d['n'] = d['e'] / (1 + d['e'])
             if d['n'] > 0 and d['e'] == 0: d['e'] = d['n'] / (1 - d['n'])
-            
             if d['vw'] > 0 and d['vv'] > 0 and d['s'] == 0: d['s'] = d['vw'] / d['vv']
             if d['s'] > 0 and d['vv'] > 0 and d['vw'] == 0: d['vw'] = d['s'] * d['vv']
-            
             if d['wm'] > 0 and d['ws'] > 0 and d['ww'] == 0: d['ww'] = d['wm'] - d['ws']
             if d['wm'] > 0 and d['ww'] > 0 and d['ws'] == 0: d['ws'] = d['wm'] - d['ww']
             if d['ws'] > 0 and d['ww'] > 0 and d['wm'] == 0: d['wm'] = d['ws'] + d['ww']
             if d['vv'] > 0 and d['vw'] > 0 and d['va'] == 0: d['va'] = max(0.0, d['vv'] - d['vw'])
-            
             if d['wm'] > 0 and d['vt'] > 0 and d['gh'] == 0: d['gh'] = d['wm'] / d['vt']
             if d['ws'] > 0 and d['vt'] > 0 and d['gd'] == 0: d['gd'] = d['ws'] / d['vt']
 
@@ -122,27 +116,21 @@ with tabs[0]:
 
         with col_sim:
             st.subheader("🕹️ 2. Simulador de Estados")
-            e_val = st.slider("Relación de vacíos (e)", 0.1, 5.0, float(bc['e']) if bc['e'] > 0 else 0.70, key=f"s_e_{sk}")
+            # ELIMINADOS VALORES POR DEFECTO: Ahora nacen de lo calculado o 0.0
+            e_val = st.slider("Relación de vacíos (e)", 0.0, 5.0, float(bc['e']), key=f"s_e_{sk}")
             w_val = st.slider("Contenido de humedad (w %)", 0.0, 100.0, float(bc['w']*100), key=f"s_w_{sk}") / 100
             s_val = st.slider("Grado de saturación (S %)", 0.0, 100.0, float(bc['s']*100), key=f"s_s_{sk}") / 100
-            
-            ws_inicial = bc['ws']
-            if ws_inicial == 0 and modo == "Metas (Laboratorio)":
-                ws_inicial = bc['wm'] / (1 + bc['w']) if bc['wm'] > 0 else 160.0
-            elif ws_inicial == 0:
-                ws_inicial = 160.0
-                
-            ws_val = st.slider("Peso de los sólidos (Ws)", 10.0, 5000.0, float(ws_inicial), key=f"s_ws_{sk}")
+            ws_val = st.slider("Peso de los sólidos (Ws)", 0.0, 5000.0, float(bc['ws']), key=f"s_ws_{sk}")
 
             f = {k: 0.0 for k in diccionario_maestro.keys()}
-            f['gs'] = bc['gs'] if bc['gs'] > 0 else 2.65
+            f['gs'] = bc['gs']
             f['e'], f['ws'] = e_val, ws_val
             
             if modo == "Académico (Base Vs=1)":
                 f['vs'] = 1.0
-                f['ws'] = f['gs'] * f['vs']
+                f['ws'] = f['gs'] * f['vs'] if f['gs'] > 0 else 0
             else:
-                f['vs'] = f['ws'] / f['gs']
+                f['vs'] = f['ws'] / f['gs'] if f['gs'] > 0 else 0
             
             f['vv'] = f['e'] * f['vs']
             f['vt'] = f['vs'] + f['vv']
@@ -151,7 +139,7 @@ with tabs[0]:
                 f['s'] = s_val
                 f['vw'] = f['s'] * f['vv']
                 f['ww'] = f['vw']
-                f['w'] = f['ww'] / f['ws']
+                f['w'] = f['ww'] / f['ws'] if f['ws'] > 0 else 0
             else:
                 f['w'] = w_val
                 f['ww'] = f['ws'] * f['w']
@@ -160,9 +148,9 @@ with tabs[0]:
 
             f['va'] = max(0.0, f['vv'] - f['vw'])
             f['wm'] = f['ws'] + f['ww']
-            f['n'] = f['vv'] / f['vt']
-            f['gh'] = f['wm'] / f['vt']
-            f['gd'] = f['ws'] / f['vt']
+            f['n'] = f['vv'] / f['vt'] if f['vt'] > 0 else 0
+            f['gh'] = f['wm'] / f['vt'] if f['vt'] > 0 else 0
+            f['gd'] = f['ws'] / f['vt'] if f['vt'] > 0 else 0
 
             if st.button("🔄 Resetear Muestra"):
                 del st.session_state.base_calc
@@ -190,7 +178,7 @@ with tabs[0]:
             fig.update_layout(barmode='stack', title='Distribución de Volúmenes', height=400, showlegend=True)
             st.plotly_chart(fig, use_container_width=True)
 
-# --- PESTAÑA 2: PERFIL DE PRESIONES ---
+# --- PESTAÑA 2: PERFIL DE PRESIONES (RESTAURADO) ---
 with tabs[1]:
     st.header("🗂️ Cálculo de Esfuerzos Geostáticos")
     col_p1, col_p2 = st.columns([1, 2])
@@ -250,7 +238,7 @@ with tabs[1]:
         fig_p.update_layout(height=500, title="Perfil de Esfuerzos Geostáticos")
         st.plotly_chart(fig_p, use_container_width=True)
 
-# --- PESTAÑA 3: PLASTICIDAD Y CLASIFICACIÓN ---
+# --- PESTAÑA 3: PLASTICIDAD Y CLASIFICACIÓN (RESTAURADO) ---
 with tabs[2]:
     st.header("📈 Límites de Atterberg y Clasificación SUCS")
     col_c1, col_c2 = st.columns([1, 2])
@@ -278,10 +266,10 @@ with tabs[2]:
         linea_a = np.maximum(0, linea_a)
         
         fig_c = go.Figure()
-        fig_c.add_trace(go.Scatter(x=ll_plot, y=linea_a, name='Línea A (IP=0.73(LL-20))', line=dict(color='black')))
+        fig_c.add_trace(go.Scatter(x=ll_plot, y=linea_a, name='Línea A', line=dict(color='black')))
         fig_c.add_trace(go.Scatter(x=[ll], y=[ip], name='Tu Muestra', mode='markers', marker=dict(size=15, color='red')))
         
-        fig_c.update_layout(title="Carta de Plasticidad de Casagrande", xaxis_title="LL", yaxis_title="IP", height=450)
+        fig_c.update_layout(title="Carta de Plasticidad", xaxis_title="LL", yaxis_title="IP", height=450)
         fig_c.add_shape(type="line", x0=50, y0=0, x1=50, y1=60, line=dict(color="Gray", dash="dash"))
         st.plotly_chart(fig_c, use_container_width=True)
 
@@ -289,20 +277,10 @@ with tabs[2]:
 with tabs[3]:
     st.header("📥 Generación de Reporte Técnico")
     if 'df_excel' in st.session_state:
-        st.write("Vista previa de los datos a exportar:")
         st.dataframe(st.session_state.df_excel)
-        
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             st.session_state.df_excel.to_excel(writer, index=False, sheet_name='Resultados_Fases')
             if 'df_presiones' in locals():
                 df_presiones.to_excel(writer, index=False, sheet_name='Perfil_Esfuerzos')
-        
-        st.download_button(
-            label="💾 Descargar Reporte en Excel",
-            data=output.getvalue(),
-            file_name="Reporte_Geotecnico_Suite.xlsx",
-            mime="application/vnd.ms-excel"
-        )
-    else:
-        st.warning("Primero realiza cálculos en la pestaña de Gravimetría.")
+        st.download_button(label="💾 Descargar Reporte en Excel", data=output.getvalue(), file_name="Reporte_Geotecnico.xlsx")
