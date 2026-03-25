@@ -5,7 +5,7 @@ import numpy as np
 import io
 
 # 1. CONFIGURACIÓN
-st.set_page_config(page_title="Geotecnia Suite Master v23.4", layouimportt="wide", page_icon="🏗️")
+st.set_page_config(page_title="Geotecnia Suite Master v23.4", layout="wide", page_icon="🏗️")
 
 st.sidebar.title("👨‍🏫 Panel de Control")
 modo = st.sidebar.radio("Selecciona el Modo:", ("Metas (Laboratorio)", "Académico (Base Vs=1)"))
