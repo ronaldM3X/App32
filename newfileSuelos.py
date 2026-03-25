@@ -5,7 +5,7 @@ import numpy as np
 import io
 
 # 1. CONFIGURACIÓN
-st.set_page_config(page_title="Geotecnia Suite Master v23.4", layout="wide", page_icon="🏗️")
+st.set_page_config(page_title="Geotecnia Suite Master v23.4", layouimportt="wide", page_icon="🏗️")
 
 st.sidebar.title("👨‍🏫 Panel de Control")
 modo = st.sidebar.radio("Selecciona el Modo:", ("Metas (Laboratorio)", "Académico (Base Vs=1)"))
@@ -48,42 +48,89 @@ with tabs[0]:
         for k, v in inputs.items():
             d[k] = v / 100 if k in ['w', 'n', 's'] and v > 1.0 else v
         
-        # MOTOR DE INFERENCIA ESTRICTO Y COMPLETO
-        for _ in range(50):
-            # Fase 1: Pesos, Gs y Vs
+        # MOTOR DE INFERENCIA COMPLETO CON RETROALIMENTACIÓN
+        for _ in range(100):
+            # ── Fase 1: Gs, Ws, Vs (triángulo fundamental) ──────────────────
             if d['gs'] > 0 and d['ws'] > 0 and d['vs'] == 0: d['vs'] = d['ws'] / d['gs']
             if d['gs'] > 0 and d['vs'] > 0 and d['ws'] == 0: d['ws'] = d['gs'] * d['vs']
             if d['ws'] > 0 and d['vs'] > 0 and d['gs'] == 0: d['gs'] = d['ws'] / d['vs']
-            
-            # Fase 2: Humedad y Peso de Agua
-            if d['ws'] > 0 and d['w'] > 0 and d['ww'] == 0: d['ww'] = d['ws'] * d['w']
-            if d['ws'] > 0 and d['ww'] > 0 and d['w'] == 0: d['w'] = d['ww'] / d['ws']
-            if d['ww'] > 0: d['vw'] = d['ww']
-            
-            # Fase 3: CONEXIONES DE VOLÚMENES (La clave de tu ejercicio)
+
+            # ── Fase 2: Relación e ↔ Vv, Vs ─────────────────────────────────
+            if d['vv'] > 0 and d['vs'] > 0 and d['e'] == 0:  d['e'] = d['vv'] / d['vs']
+            if d['e']  > 0 and d['vs'] > 0 and d['vv'] == 0: d['vv'] = d['e'] * d['vs']
+            if d['e']  > 0 and d['vv'] > 0 and d['vs'] == 0: d['vs'] = d['vv'] / d['e']
+
+            # ── Fase 3: Porosidad n ↔ e, Vt, Vv, Vs ─────────────────────────
+            if d['e'] > 0 and d['n'] == 0:
+                d['n'] = d['e'] / (1 + d['e'])
+            if 0 < d['n'] < 1 and d['e'] == 0:
+                d['e'] = d['n'] / (1 - d['n'])
+            if d['n'] > 0 and d['vt'] > 0 and d['vv'] == 0:
+                d['vv'] = d['n'] * d['vt']
+            if d['n'] > 0 and d['vt'] > 0 and d['vs'] == 0:
+                d['vs'] = (1 - d['n']) * d['vt']
+            if d['n'] > 0 and d['vs'] > 0 and d['vt'] == 0:
+                d['vt'] = d['vs'] / (1 - d['n'])
+            if d['n'] > 0 and d['vv'] > 0 and d['vt'] == 0:
+                d['vt'] = d['vv'] / d['n']
+            if d['vt'] > 0 and d['vv'] > 0 and d['n'] == 0:
+                d['n'] = d['vv'] / d['vt']
+
+            # ── Fase 4: Volumen total Vt = Vs + Vv ───────────────────────────
             if d['vt'] > 0 and d['vs'] > 0 and d['vv'] == 0: d['vv'] = d['vt'] - d['vs']
             if d['vt'] > 0 and d['vv'] > 0 and d['vs'] == 0: d['vs'] = d['vt'] - d['vv']
             if d['vs'] > 0 and d['vv'] > 0 and d['vt'] == 0: d['vt'] = d['vs'] + d['vv']
-            
-            # Fase 4: Relaciones de Vacíos y Porosidad
-            if d['vv'] > 0 and d['vs'] > 0 and d['e'] == 0: d['e'] = d['vv'] / d['vs']
-            if d['e'] > 0 and d['vs'] > 0 and d['vv'] == 0: d['vv'] = d['e'] * d['vs']
-            if d['vt'] > 0 and d['vv'] > 0 and d['n'] == 0: d['n'] = d['vv'] / d['vt']
-            if d['e'] > 0 and d['n'] == 0: d['n'] = d['e'] / (1 + d['e'])
-            if d['n'] > 0 and d['e'] == 0: d['e'] = d['n'] / (1 - d['n'])
-            
-            # Fase 5: Saturación
-            if d['vw'] > 0 and d['vv'] > 0 and d['s'] == 0: d['s'] = d['vw'] / d['vv']
-            if d['s'] > 0 and d['vv'] > 0 and d['vw'] == 0: d['vw'] = d['s'] * d['vv']
-            
-            # Fase 6: Pesos Totales y Aire
+
+            # ── Fase 5: Humedad w, Ww, Ws ────────────────────────────────────
+            if d['ws'] > 0 and d['w']  > 0 and d['ww'] == 0: d['ww'] = d['ws'] * d['w']
+            if d['ws'] > 0 and d['ww'] > 0 and d['w']  == 0: d['w']  = d['ww'] / d['ws']
+            if d['w']  > 0 and d['ww'] > 0 and d['ws'] == 0: d['ws'] = d['ww'] / d['w']
+
+            # ── Fase 6: Vw = Ww (densidad agua = 1 g/cm³) ───────────────────
+            if d['ww'] > 0 and d['vw'] == 0: d['vw'] = d['ww']
+            if d['vw'] > 0 and d['ww'] == 0: d['ww'] = d['vw']
+
+            # ── Fase 7: Saturación S, Vw, Vv ────────────────────────────────
+            if d['vw'] > 0 and d['vv'] > 0 and d['s']  == 0: d['s']  = d['vw'] / d['vv']
+            if d['s']  > 0 and d['vv'] > 0 and d['vw'] == 0: d['vw'] = d['s']  * d['vv']
+            if d['s']  > 0 and d['vw'] > 0 and d['vv'] == 0: d['vv'] = d['vw'] / d['s']
+
+            # ── Fase 8: Relación fundamental  w = S·e/Gs ─────────────────────
+            if d['gs'] > 0 and d['s'] > 0 and d['e'] > 0 and d['w'] == 0:
+                d['w'] = (d['s'] * d['e']) / d['gs']
+            if d['gs'] > 0 and d['w'] > 0 and d['e'] > 0 and d['s'] == 0:
+                d['s'] = (d['w'] * d['gs']) / d['e']
+            if d['gs'] > 0 and d['w'] > 0 and d['s'] > 0 and d['e'] == 0:
+                d['e'] = (d['w'] * d['gs']) / d['s']
+            if d['w'] > 0 and d['s'] > 0 and d['e'] > 0 and d['gs'] == 0:
+                d['gs'] = (d['s'] * d['e']) / d['w']
+
+            # ── Fase 9: Peso total Wm = Ws + Ww ──────────────────────────────
             if d['wm'] > 0 and d['ws'] > 0 and d['ww'] == 0: d['ww'] = d['wm'] - d['ws']
+            if d['wm'] > 0 and d['ww'] > 0 and d['ws'] == 0: d['ws'] = d['wm'] - d['ww']
             if d['ws'] > 0 and d['ww'] > 0 and d['wm'] == 0: d['wm'] = d['ws'] + d['ww']
-            if d['vv'] > 0 and d['vw'] > 0 and d['va'] == 0: d['va'] = d['vv'] - d['vw']
-            
-            # Fase 7: Pesos Unitarios
+
+            # ── Fase 10: Volumen de aire Va = Vv - Vw ────────────────────────
+            if d['vv'] > 0 and d['vw'] > 0 and d['va'] == 0: d['va'] = max(0.0, d['vv'] - d['vw'])
+            if d['vv'] > 0 and d['va'] > 0 and d['vw'] == 0: d['vw'] = d['vv'] - d['va']
+            if d['vw'] > 0 and d['va'] > 0 and d['vv'] == 0: d['vv'] = d['vw'] + d['va']
+
+            # ── Fase 11: Pesos unitarios γ (usando γw = 1 g/cm³ = 9.81 kN/m³)─
             if d['wm'] > 0 and d['vt'] > 0 and d['gh'] == 0: d['gh'] = d['wm'] / d['vt']
+            if d['gh'] > 0 and d['vt'] > 0 and d['wm'] == 0: d['wm'] = d['gh'] * d['vt']
+            if d['gh'] > 0 and d['wm'] > 0 and d['vt'] == 0: d['vt'] = d['wm'] / d['gh']
+
             if d['ws'] > 0 and d['vt'] > 0 and d['gd'] == 0: d['gd'] = d['ws'] / d['vt']
+            if d['gd'] > 0 and d['vt'] > 0 and d['ws'] == 0: d['ws'] = d['gd'] * d['vt']
+            if d['gd'] > 0 and d['ws'] > 0 and d['vt'] == 0: d['vt'] = d['ws'] / d['gd']
+
+            # ── Fase 12: Relación γd = γh / (1 + w) ─────────────────────────
+            if d['gh'] > 0 and d['w'] > 0 and d['gd'] == 0:
+                d['gd'] = d['gh'] / (1 + d['w'])
+            if d['gd'] > 0 and d['w'] > 0 and d['gh'] == 0:
+                d['gh'] = d['gd'] * (1 + d['w'])
+            if d['gh'] > 0 and d['gd'] > 0 and d['gh'] > d['gd'] and d['w'] == 0:
+                d['w'] = (d['gh'] / d['gd']) - 1
 
         st.session_state.base_calc = d.copy()
         st.session_state.slider_key = np.random.randint(1, 999)
